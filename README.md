@@ -39,8 +39,11 @@ Aplicación full-stack para análisis de productos de e-commerce con IA, anális
 ### 1. Backend
 
 \`\`\`bash
+py -3.12 -m venv .venv
+.venv\Scripts\activate
 cd backend
 pip install -r requirements.txt
+pip install pydantic[email]
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 \`\`\`
 
@@ -55,15 +58,7 @@ npm run dev
 
 La aplicación estará en `http://localhost:3000`
 
-### 3. Variables de Entorno
 
-Crea `.env.local` en la raíz del proyecto:
-
-\`\`\`env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-\`\`\`
-
----
 
 ## Despliegue en Producción
 
@@ -305,8 +300,4 @@ Una vez el backend esté corriendo:
 - Las variables sensibles se manejan con variables de entorno
 - SQL injection protegido por SQLAlchemy ORM
 
----
 
-## Licencia
-
-MIT

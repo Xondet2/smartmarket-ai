@@ -58,6 +58,21 @@ Instala torch manualmente primero:
 \`\`\`bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
+
+### Problema 5: Error con `EmailStr` de Pydantic
+```
+ImportError: email-validator is not installed, run `pip install pydantic[email]`
+```
+
+**Causa:**
+El proyecto usa `EmailStr` en los modelos (por ejemplo, en `routes/auth.py`). En Pydantic v2 esta funcionalidad requiere el extra `email`, que instala la librería `email-validator`.
+
+**Solución:**
+- Ya está corregido en `requirements.txt` usando `pydantic[email]`.
+- Si instalas manualmente, usa:
+```bash
+pip install "pydantic[email]>=2.12.0,<3.0.0"
+```
 \`\`\`
 
 ## Verificar que el backend funciona

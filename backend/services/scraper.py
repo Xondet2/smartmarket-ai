@@ -5,13 +5,18 @@ from datetime import datetime
 import re
 import time
 import random
+import os
+from urllib.parse import urlparse, parse_qs
+"""
+NOTA: Este módulo ha sido simplificado para centrarse en la API oficial
+de Mercado Libre. El scraping de otras plataformas (Amazon/eBay/AliExpress)
+se ha comentado como referencia histórica y no se ejecuta.
+
+Si más adelante se necesita compatibilidad multi-plataforma, se pueden
+recuperar las secciones comentadas y añadir parsers específicos.
+"""
 
 class ProductScraper:
-    """
-    Web scraper for e-commerce platforms
-    Supports Amazon, eBay, and generic product pages with real scraping
-    """
-    
     def __init__(self):
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -22,472 +27,497 @@ class ProductScraper:
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1'
         }
-    
-    def search_product_by_name(self, product_name: str, platforms: List[str] = None) -> List[Dict]:
-        """
-        Search for a product by name across multiple platforms
-        Attempts real scraping first, falls back to mock data
-        """
-        if platforms is None:
-            platforms = ['amazon', 'ebay', 'mercadolibre']
-        
-        results = []
-        
-        for platform in platforms:
+        self.access_token = os.getenv('MERCADO_LIBRE_ACCESS_TOKEN')
+        self.site_id = os.getenv('MERCADO_LIBRE_SITE_ID', 'MLA')
+        # Modo estricto: usar solo la API oficial; no complementar con HTML
+        self.strict_api = str(os.getenv('MELI_STRICT_API', 'false')).lower() in {"1", "true", "yes"}
+
+    # ----------------------------
+    # Helpers internos
+    # ----------------------------
+    def _request_get(self, url: str, headers: Optional[Dict] = None, timeout: int = 15, retries: int = 2) -> requests.Response:
+        """GET con headers, timeout y reintentos simples con backoff."""
+        hdrs = {**self.headers, **(headers or {})}
+        last_exc = None
+        for attempt in range(retries + 1):
             try:
-                if platform == 'amazon':
-                    products = self._search_amazon_real(product_name)
-                elif platform == 'ebay':
-                    products = self._search_ebay_real(product_name)
-                elif platform == 'mercadolibre':
-                    products = self._search_mercadolibre_real(product_name)
-                else:
-                    continue
-                
-                results.extend(products)
-                time.sleep(random.uniform(1, 2))  # Random delay for rate limiting
-                
-            except Exception as e:
-                print(f"Error searching {platform}: {e}")
-                continue
-        
-        return results
-    
-    def _search_amazon_real(self, product_name: str) -> List[Dict]:
-        """Search Amazon for product - attempts real scraping"""
+                resp = requests.get(url, headers=hdrs, timeout=timeout)
+                resp.raise_for_status()
+                return resp
+            except requests.exceptions.RequestException as e:
+                last_exc = e
+                # Backoff con jitter
+                sleep_s = 0.5 * (attempt + 1) + random.uniform(0, 0.5)
+                time.sleep(sleep_s)
+        # Si falla después de reintentos, relanza última excepción
+        raise last_exc
+
+    def _normalize_image_url(self, url: Optional[str]) -> Optional[str]:
+        """Normaliza URLs de imagen a https, manejando esquemas relativos."""
+        if not url:
+            return None
+        u = str(url).strip()
+        if u.startswith('//'):
+            u = 'https:' + u
+        if u.startswith('http://'):
+            u = 'https://' + u[len('http://'):]
+        return u
+
+    def _extract_meli_item_id(self, url: str) -> Optional[str]:
+        """Extrae el ID de Mercado Libre (e.g., MLA123456789, MCO2676566586).
+
+        - Prefiere `wid` en query o fragmento (URLs agregadas `/p/...#...&wid=...`).
+        - Si no existe, intenta capturar IDs en la ruta (`/p/MLA123456789`).
+        - Finalmente, usa un regex general sobre toda la URL.
+        """
         try:
-            search_query = product_name.replace(' ', '+')
-            url = f"https://www.amazon.com/s?k={search_query}"
-            
-            response = requests.get(url, headers=self.headers, timeout=10)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Try to find first product result
-                product_div = soup.find('div', {'data-component-type': 's-search-result'})
-                
-                if product_div:
-                    # Extract name
-                    name_elem = product_div.find('h2')
-                    name = name_elem.text.strip() if name_elem else product_name
-                    
-                    # Extract price
-                    price = None
-                    price_elem = product_div.find('span', {'class': 'a-price-whole'})
-                    if price_elem:
-                        price_text = price_elem.text.strip().replace(',', '').replace('.', '')
-                        try:
-                            price = float(price_text) / 100
-                        except:
-                            pass
-                    
-                    # Extract URL
-                    link_elem = product_div.find('a', {'class': 'a-link-normal'})
-                    product_url = f"https://www.amazon.com{link_elem['href']}" if link_elem and 'href' in link_elem.attrs else url
-                    
-                    # Extract rating
-                    rating = 4.0
-                    rating_elem = product_div.find('span', {'class': 'a-icon-alt'})
-                    if rating_elem:
-                        rating_text = rating_elem.text.strip()
-                        match = re.search(r'(\d+\.?\d*)', rating_text)
-                        if match:
-                            rating = float(match.group(1))
-                    
-                    if price:  # Only return if we got a price
-                        return [{
-                            'name': name[:100],  # Limit name length
-                            'price': price,
-                            'platform': 'amazon',
-                            'url': product_url,
-                            'rating': rating,
-                            'reviews_count': random.randint(100, 5000)
-                        }]
-        
-        except Exception as e:
-            print(f"Amazon real scraping failed: {e}")
-        
-        base_price = 50 + (hash(product_name) % 150)
-        return [{
-            'name': f"{product_name}",
-            'price': round(base_price * 0.95, 2),  # Amazon usually competitive
-            'platform': 'amazon',
-            'url': f"https://www.amazon.com/s?k={product_name.replace(' ', '+')}",
-            'rating': 4.3 + (hash(product_name) % 7) / 10,
-            'reviews_count': 500 + (hash(product_name) % 2000)
-        }]
-    
-    def _search_ebay_real(self, product_name: str) -> List[Dict]:
-        """Search eBay for product - attempts real scraping"""
+            parsed = urlparse(url)
+            # 1) Query params
+            q = parse_qs(parsed.query)
+            wid_q = (q.get('wid') or q.get('item_id') or [])
+            if wid_q:
+                return (wid_q[0] or '').upper() or None
+
+            # 2) Fragment (algunas URLs de ML ponen wid en el hash)
+            frag_q = parse_qs(parsed.fragment)
+            wid_f = (frag_q.get('wid') or frag_q.get('item_id') or [])
+            if wid_f:
+                return (wid_f[0] or '').upper() or None
+
+            # 3) Ruta con /p/<ID>
+            m_path = re.search(r"/p/([A-Z]{3}-?\d{6,})", parsed.path, re.IGNORECASE)
+            if m_path:
+                return m_path.group(1).upper()
+
+            # 4) Regex general
+            m = re.search(r'([A-Z]{3}-?\d{6,})', url)
+            return m.group(1).upper() if m else None
+        except Exception:
+            return None
+
+    def _parse_date_iso(self, s: str) -> datetime:
+        """Convierte fechas ISO con offsets tipo -0400 a -04:00 para compatibilidad."""
+        if not s:
+            return datetime.utcnow()
+        # Reemplazar Z por +00:00
+        s2 = s.replace('Z', '+00:00')
+        # Normalizar offset final -0400 -> -04:00
+        s2 = re.sub(r'([+-]\d{2})(\d{2})$', r'\1:\2', s2)
         try:
-            search_query = product_name.replace(' ', '+')
-            url = f"https://www.ebay.com/sch/i.html?_nkw={search_query}"
-            
-            response = requests.get(url, headers=self.headers, timeout=10)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Try to find first product
-                item = soup.find('div', {'class': 's-item__info'})
-                
-                if item:
-                    # Extract name
-                    name_elem = item.find('div', {'class': 's-item__title'})
-                    name = name_elem.text.strip() if name_elem else product_name
-                    
-                    # Extract price
-                    price = None
-                    price_elem = item.find('span', {'class': 's-item__price'})
-                    if price_elem:
-                        price_text = re.sub(r'[^\d.]', '', price_elem.text)
-                        try:
-                            price = float(price_text)
-                        except:
-                            pass
-                    
-                    # Extract URL
-                    link_elem = item.find_parent('a')
-                    product_url = link_elem['href'] if link_elem and 'href' in link_elem.attrs else url
-                    
-                    if price:
-                        return [{
-                            'name': name[:100],
-                            'price': price,
-                            'platform': 'ebay',
-                            'url': product_url,
-                            'rating': 4.0 + (hash(name) % 8) / 10,
-                            'reviews_count': random.randint(50, 2000)
-                        }]
-        
-        except Exception as e:
-            print(f"eBay real scraping failed: {e}")
-        
-        base_price = 50 + (hash(product_name) % 150)
-        return [{
-            'name': f"{product_name}",
-            'price': round(base_price * 1.05, 2),  # eBay slightly higher
-            'platform': 'ebay',
-            'url': f"https://www.ebay.com/sch/i.html?_nkw={product_name.replace(' ', '+')}",
-            'rating': 4.1 + (hash(product_name) % 6) / 10,
-            'reviews_count': 300 + (hash(product_name) % 1500)
-        }]
-    
-    def _search_mercadolibre_real(self, product_name: str) -> List[Dict]:
-        """Search MercadoLibre for product - attempts real scraping"""
-        try:
-            search_query = product_name.replace(' ', '-')
-            url = f"https://listado.mercadolibre.com.mx/{search_query}"
-            
-            response = requests.get(url, headers=self.headers, timeout=10)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Try to find first product
-                item = soup.find('li', {'class': 'ui-search-layout__item'})
-                
-                if item:
-                    # Extract name
-                    name_elem = item.find('h2', {'class': 'ui-search-item__title'})
-                    name = name_elem.text.strip() if name_elem else product_name
-                    
-                    # Extract price
-                    price = None
-                    price_elem = item.find('span', {'class': 'andes-money-amount__fraction'})
-                    if price_elem:
-                        price_text = price_elem.text.strip().replace(',', '').replace('.', '')
-                        try:
-                            price = float(price_text)
-                        except:
-                            pass
-                    
-                    # Extract URL
-                    link_elem = item.find('a', {'class': 'ui-search-link'})
-                    product_url = link_elem['href'] if link_elem and 'href' in link_elem.attrs else url
-                    
-                    if price:
-                        return [{
-                            'name': name[:100],
-                            'price': price,
-                            'platform': 'mercadolibre',
-                            'url': product_url,
-                            'rating': 4.2 + (hash(name) % 7) / 10,
-                            'reviews_count': random.randint(100, 3000)
-                        }]
-        
-        except Exception as e:
-            print(f"MercadoLibre real scraping failed: {e}")
-        
-        base_price = 50 + (hash(product_name) % 150)
-        return [{
-            'name': f"{product_name}",
-            'price': round(base_price * 1.02, 2),  # ML competitive pricing
-            'platform': 'mercadolibre',
-            'url': f"https://listado.mercadolibre.com.mx/{product_name.replace(' ', '-')}",
-            'rating': 4.4 + (hash(product_name) % 6) / 10,
-            'reviews_count': 800 + (hash(product_name) % 2500)
-        }]
+            return datetime.fromisoformat(s2)
+        except Exception:
+            return datetime.utcnow()
     
     def detect_platform(self, url: str) -> str:
-        """Detect which e-commerce platform from URL"""
-        if 'amazon' in url.lower():
-            return 'amazon'
-        elif 'ebay' in url.lower():
-            return 'ebay'
-        elif 'mercadolibre' in url.lower() or 'mercadolivre' in url.lower():
-            return 'mercadolibre'
+        """Detecta la plataforma; actualmente solo se soporta Mercado Libre."""
+        url = url.lower()
+        if "mercadolibre" in url:
+            return "mercadolibre"
+        # Comentado: soporte para otras plataformas
+        # elif "amazon" in url:
+        #     return "amazon"
+        # elif "ebay" in url:
+        #     return "ebay"
+        # elif "aliexpress" in url:
+        #     return "aliexpress"
         else:
-            return 'generic'
+            return "unknown"
+
+    # BÚSQUEDA POR NOMBRE (comentada): Multi-plataforma
+    # def search_product_by_name(self, product_name: str, platforms: List[str] = None) -> List[Dict]:
+    #     """Buscar productos por nombre en múltiples plataformas (no usado)."""
+    #     # Implementación previa eliminada para centrarnos en Mercado Libre.
+    #     # Se puede reintroducir con la API de búsqueda de ML u otras fuentes.
+    #     return []
+
+    # Nuevos métodos para API de Mercado Libre (robustos)
     
-    def scrape_product(self, url: str) -> Dict:
-        """
-        Scrape product information from URL
-        Attempts real scraping with fallback
-        """
-        platform = self.detect_platform(url)
-        
+    def scrape_product_api(self, item_id: str) -> Dict:
+        if not self.access_token:
+            # Sin token, usar fallback HTML directo por item_id
+            return self._scrape_mercadolibre_html(item_id)
+        url = f"https://api.mercadolibre.com/items/{item_id}"
+        headers = {**self.headers, 'Authorization': f'Bearer {self.access_token}'}
         try:
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            if platform == 'amazon':
-                return self._scrape_amazon(soup, url)
-            elif platform == 'ebay':
-                return self._scrape_ebay(soup, url)
-            elif platform == 'mercadolibre':
-                return self._scrape_mercadolibre(soup, url)
-            else:
-                return self._scrape_generic(soup, url)
-                
-        except Exception as e:
-            print(f"Error scraping product: {e}")
+            response = self._request_get(url, headers=headers, timeout=15, retries=2)
+            data = response.json()
+            # Nombre robusto: si falta en la API, intentar HTML fallback
+            api_name = data.get('title')
+            # Solo complementar con HTML si NO estamos en modo estricto
+            if ((not api_name) or (str(api_name).strip().lower() in {"unknown product", "unknown", "undefined"})) and (not self.strict_api):
+                try:
+                    html_fallback = self._scrape_mercadolibre_html(item_id)
+                    api_name = html_fallback.get('name') or api_name
+                except Exception:
+                    pass
+
             return {
-                'name': 'Product from ' + platform.title(),
-                'price': round(75 + (hash(url) % 100), 2),
-                'platform': platform,
-                'url': url,
-                'error': str(e)
+                'name': api_name or 'Unknown Product',
+                'price': data.get('price', None),
+                'platform': 'mercadolibre',
+                'url': data.get('permalink', ''),
+                'image_url': self._normalize_image_url(
+                    (data.get('thumbnail', '') or (data.get('pictures', [{}])[0].get('url', '') if data.get('pictures') else ''))
+                ),
+                'reviews_count': (data.get('reviews', {}) or {}).get('total', 0),
+                'rating': (data.get('reviews', {}) or {}).get('rating_average', None),
             }
-    
-    def scrape_reviews(self, url: str, max_reviews: int = 50) -> List[Dict]:
-        """
-        Scrape product reviews from URL
-        Returns list of reviews with rating, text, user, and date
-        """
-        platform = self.detect_platform(url)
-        
+        except requests.exceptions.RequestException as e:
+            print(f"Error API producto ML: {e}. Cayendo a scraping.")
+            return self._scrape_mercadolibre_html(item_id)  # Fallback HTML básico
+
+    def scrape_reviews_api(self, item_id: str, max_reviews: int = 50) -> List[Dict]:
+        if not self.access_token:
+            # Sin token, intentar scrapear reseñas del HTML del artículo
+            return self._scrape_mercadolibre_reviews(item_id, max_reviews)
+        url = f"https://api.mercadolibre.com/reviews/item/{item_id}?limit={max_reviews}"
+        headers = {**self.headers, 'Authorization': f'Bearer {self.access_token}'}
         try:
-            if platform == 'amazon':
-                return self._scrape_amazon_reviews(url, max_reviews)
-            elif platform == 'ebay':
-                return self._scrape_ebay_reviews(url, max_reviews)
-            elif platform == 'mercadolibre':
-                return self._scrape_mercadolibre_reviews(url, max_reviews)
-            else:
-                return self._scrape_generic_reviews(url, max_reviews)
-                
-        except Exception as e:
-            print(f"Error scraping reviews: {e}")
-            return []
-    
-    def _scrape_amazon(self, soup: BeautifulSoup, url: str) -> Dict:
-        """Scrape Amazon product page"""
+            response = self._request_get(url, headers=headers, timeout=15, retries=2)
+            data = response.json()
+            reviews = []
+            for review in data.get('reviews', []):
+                reviews.append({
+                    'user_name': review.get('reviewer', {}).get('nickname', 'Anonymous'),
+                    'rating': review.get('rate', 3.0),
+                    'text': review.get('content', ''),
+                    'review_date': self._parse_date_iso(review.get('date_created', datetime.utcnow().isoformat())),
+                    'platform': 'mercadolibre'
+                })
+            time.sleep(random.uniform(1, 2))  # Delay para rate limit
+            return reviews
+        except requests.exceptions.RequestException as e:
+            print(f"Error API reseñas ML: {e}. Cayendo a scraping.")
+            return self._scrape_mercadolibre_reviews(f"https://articulo.mercadolibre.com.ar/{item_id}", max_reviews)
+
+    # ----------------------------
+    # Fallback HTML Mercado Libre
+    # ----------------------------
+    def _scrape_mercadolibre_html(self, item_id: str) -> Dict:
+        """Obtiene datos mínimos del HTML del artículo como fallback."""
+        # Seleccionar dominio según prefijo de sitio del item_id
+        prefix = (item_id[:3] or '').upper()
+        tld_map = {
+            'MLA': 'com.ar',
+            'MLB': 'com.br',
+            'MLM': 'com.mx',
+            'MLC': 'cl',
+            'MCO': 'com.co',
+            'MLU': 'com.uy',
+            'MLV': 'com.ve',
+            'MPE': 'com.pe',
+        }
+        tld = tld_map.get(prefix, 'com.ar')
+        article_url = f"https://articulo.mercadolibre.{tld}/{item_id}"
         try:
-            # Product name
-            name_elem = soup.find('span', {'id': 'productTitle'})
-            name = name_elem.text.strip() if name_elem else 'Unknown Product'
-            
-            # Price
-            price_elem = soup.find('span', {'class': 'a-price-whole'})
+            resp = self._request_get(article_url, timeout=15, retries=1)
+            html = resp.text
+            soup = BeautifulSoup(html, 'html.parser')
+            name = None
+            image_url = None
             price = None
-            if price_elem:
-                price_text = price_elem.text.strip().replace(',', '').replace('.', '')
-                price = float(price_text) / 100 if price_text.isdigit() else None
-            
+            # OpenGraph
+            og_title = soup.find('meta', property='og:title')
+            if og_title:
+                name = og_title.get('content')
+            og_image = soup.find('meta', property='og:image')
+            if og_image:
+                image_url = self._normalize_image_url(og_image.get('content'))
+            # Twitter Card
+            if not image_url:
+                tw_img = soup.find('meta', attrs={'name': 'twitter:image'}) or soup.find('meta', property='twitter:image')
+                if tw_img and tw_img.get('content'):
+                    image_url = self._normalize_image_url(tw_img.get('content'))
+            # JSON-LD Product
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    import json
+                    data = json.loads(script.string or '{}')
+                    if isinstance(data, dict) and data.get('@type') == 'Product':
+                        name = name or data.get('name')
+                        offers = data.get('offers')
+                        if isinstance(offers, dict):
+                            price = price or float(offers.get('price', 0)) or None
+                            image_url = image_url or (data.get('image') if isinstance(data.get('image'), str) else None)
+                except Exception:
+                    continue
+            # Galería de imágenes en markup de ML (ui-pdp-image/srcset/data-zoom)
+            if not image_url:
+                def pick_best_from_srcset(srcset: str) -> Optional[str]:
+                    try:
+                        candidates = []
+                        for part in (srcset or '').split(','):
+                            part = part.strip()
+                            if not part:
+                                continue
+                            bits = part.split()
+                            url = bits[0]
+                            descriptor = bits[1] if len(bits) > 1 else ''
+                            score = 0
+                            if '2x' in descriptor:
+                                score = 2000
+                            else:
+                                m = re.search(r'(\d+)w', descriptor)
+                                if m:
+                                    score = int(m.group(1))
+                            candidates.append((score, url))
+                        if candidates:
+                            candidates.sort(reverse=True)
+                            return candidates[0][1]
+                    except Exception:
+                        return None
+                for img in soup.select('img.ui-pdp-image, img.ui-pdp-gallery__figure__image, img[src*="mlstatic.com"]'):
+                    try:
+                        zoom = img.get('data-zoom')
+                        if zoom:
+                            image_url = self._normalize_image_url(zoom)
+                            break
+                        srcset = img.get('srcset')
+                        if srcset:
+                            best = pick_best_from_srcset(srcset)
+                            if best:
+                                image_url = self._normalize_image_url(best)
+                                break
+                        src = img.get('src')
+                        if src:
+                            image_url = self._normalize_image_url(src)
+                            break
+                    except Exception:
+                        continue
             return {
-                'name': name,
-                'price': price,
-                'platform': 'amazon',
-                'url': url
-            }
-        except Exception as e:
-            return {'name': 'Unknown Product', 'price': None, 'platform': 'amazon', 'url': url}
-    
-    def _scrape_ebay(self, soup: BeautifulSoup, url: str) -> Dict:
-        """Scrape eBay product page"""
-        try:
-            name_elem = soup.find('h1', {'class': 'x-item-title__mainTitle'})
-            name = name_elem.text.strip() if name_elem else 'Unknown Product'
-            
-            price_elem = soup.find('div', {'class': 'x-price-primary'})
-            price = None
-            if price_elem:
-                price_text = re.sub(r'[^\d.]', '', price_elem.text)
-                price = float(price_text) if price_text else None
-            
-            return {
-                'name': name,
-                'price': price,
-                'platform': 'ebay',
-                'url': url
-            }
-        except Exception as e:
-            return {'name': 'Unknown Product', 'price': None, 'platform': 'ebay', 'url': url}
-    
-    def _scrape_mercadolibre(self, soup: BeautifulSoup, url: str) -> Dict:
-        """Scrape MercadoLibre product page"""
-        try:
-            name_elem = soup.find('h1', {'class': 'ui-pdp-title'})
-            name = name_elem.text.strip() if name_elem else 'Unknown Product'
-            
-            price_elem = soup.find('span', {'class': 'andes-money-amount__fraction'})
-            price = None
-            if price_elem:
-                price_text = price_elem.text.strip().replace(',', '').replace('.', '')
-                price = float(price_text) if price_text.isdigit() else None
-            
-            return {
-                'name': name,
+                'name': name or 'Unknown Product',
                 'price': price,
                 'platform': 'mercadolibre',
-                'url': url
+                'url': article_url,
+                'image_url': self._normalize_image_url(image_url)
             }
         except Exception as e:
-            return {'name': 'Unknown Product', 'price': None, 'platform': 'mercadolibre', 'url': url}
-    
-    def _scrape_generic(self, soup: BeautifulSoup, url: str) -> Dict:
-        """Scrape generic product page"""
-        # Try to find product name in common locations
-        name = 'Unknown Product'
-        for tag in ['h1', 'h2']:
-            elem = soup.find(tag)
-            if elem:
-                name = elem.text.strip()
-                break
-        
-        return {
-            'name': name,
-            'price': None,
-            'platform': 'generic',
-            'url': url
-        }
-    
-    def _scrape_amazon_reviews(self, url: str, max_reviews: int) -> List[Dict]:
-        """Scrape Amazon reviews"""
-        reviews = []
-        
-        positive_templates = [
-            "Great quality product! Very satisfied with the purchase. Fast shipping and excellent customer service.",
-            "Amazing value for money. The product works perfectly and exceeded my expectations. Highly recommend!",
-            "Excellent build quality. Durable and reliable. Been using it for weeks without any issues.",
-            "Perfect for my needs. Easy to use and setup was straightforward. Very happy with this purchase.",
-            "Outstanding performance! The product is exactly as described. Fast delivery and great packaging.",
-        ]
-        
-        negative_templates = [
-            "Disappointed with the quality. Product broke after just a few days. Not worth the price.",
-            "Poor customer service. The item arrived damaged and getting a refund was difficult.",
-            "Not as advertised. The product doesn't work as expected. Very frustrating experience.",
-            "Terrible quality. Cheap materials and poor construction. Would not recommend to anyone.",
-            "Waste of money. Product stopped working after a week. Very disappointed with this purchase.",
-        ]
-        
-        neutral_templates = [
-            "Product is okay. Nothing special but does the job. Average quality for the price.",
-            "Decent purchase. Has some good features but also some drawbacks. Could be better.",
-            "It works as expected. Not amazing but not terrible either. Fair value for money.",
-            "Average product. Some aspects are good, others could be improved. Acceptable overall.",
-            "Mixed feelings about this. Good in some ways but lacking in others. Okay purchase.",
-        ]
-        
-        for i in range(min(max_reviews, 20)):
-            if i < max_reviews * 0.6:  # 60% positive
-                text = positive_templates[i % len(positive_templates)]
-                rating = 4.0 + (i % 2)
-            elif i < max_reviews * 0.85:  # 25% neutral
-                text = neutral_templates[i % len(neutral_templates)]
-                rating = 3.0
-            else:  # 15% negative
-                text = negative_templates[i % len(negative_templates)]
-                rating = 1.0 + (i % 2)
-            
-            reviews.append({
-                'user_name': f'Customer {i+1}',
-                'rating': rating,
-                'text': text,
-                'review_date': datetime.now(),
-                'platform': 'amazon'
-            })
-        
-        return reviews
-    
-    def _scrape_ebay_reviews(self, url: str, max_reviews: int) -> List[Dict]:
-        """Scrape eBay reviews"""
-        reviews = []
-        
-        templates = [
-            "Good seller. Item arrived quickly and was well packaged. Product quality is excellent.",
-            "Fast shipping! Product exactly as described. Very pleased with this transaction.",
-            "Great communication from seller. Item works perfectly. Would buy from again.",
-            "Item took longer to arrive than expected but quality is good. Satisfied overall.",
-            "Product is decent but had some minor issues. Seller was helpful in resolving them.",
-            "Not happy with the condition of the item. Looked used despite being listed as new.",
-        ]
-        
-        for i in range(min(max_reviews, 15)):
-            rating = 3.5 + (i % 3) * 0.5
-            reviews.append({
-                'user_name': f'Buyer {i+1}',
-                'rating': rating,
-                'text': templates[i % len(templates)],
-                'review_date': datetime.now(),
-                'platform': 'ebay'
-            })
-        
-        return reviews
-    
-    def _scrape_mercadolibre_reviews(self, url: str, max_reviews: int) -> List[Dict]:
-        """Scrape MercadoLibre reviews"""
-        reviews = []
-        
-        templates = [
-            "Excelente producto! Llegó rápido y en perfectas condiciones. Muy recomendado.",
-            "Buena calidad y precio justo. El vendedor fue muy atento. Compraría nuevamente.",
-            "Producto tal como se describe. Envío rápido y bien empaquetado. Satisfecho.",
-            "Cumple con lo esperado. Buena relación calidad-precio. Recomendable.",
-            "Regular. El producto funciona pero esperaba mejor calidad por el precio.",
-            "Decepcionado. El artículo llegó con defectos. Proceso de devolución complicado.",
-        ]
-        
-        for i in range(min(max_reviews, 18)):
-            rating = 4.0 + (i % 2) * 0.5 if i < max_reviews * 0.7 else 2.0 + (i % 2)
-            reviews.append({
-                'user_name': f'Usuario {i+1}',
-                'rating': rating,
-                'text': templates[i % len(templates)],
-                'review_date': datetime.now(),
-                'platform': 'mercadolibre'
-            })
-        
-        return reviews
-    
-    def _scrape_generic_reviews(self, url: str, max_reviews: int) -> List[Dict]:
-        """Scrape generic reviews"""
-        reviews = []
-        
-        for i in range(min(max_reviews, 10)):
-            reviews.append({
-                'user_name': f'User {i+1}',
-                'rating': 3.0 + (i % 3),
-                'text': f'Generic review {i+1}. Sample content.',
-                'review_date': datetime.now(),
-                'platform': 'generic'
-            })
-        
-        return reviews
+            print(f"Fallback HTML ML error: {e}")
+            return {
+                'name': 'Unknown Product',
+                'price': None,
+                'platform': 'mercadolibre',
+                'url': article_url,
+                'image_url': None
+            }
 
-# Singleton instance
+    def _scrape_mercadolibre_html_by_url(self, url: str) -> Dict:
+        """Fallback mínimo: obtener título e imagen desde una URL de ML directamente."""
+        try:
+            resp = self._request_get(url, timeout=15, retries=1)
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            name = None
+            image_url = None
+            price = None
+            og_title = soup.find('meta', property='og:title')
+            if og_title:
+                name = og_title.get('content')
+            og_image = soup.find('meta', property='og:image')
+            if og_image:
+                image_url = self._normalize_image_url(og_image.get('content'))
+            if not image_url:
+                tw_img = soup.find('meta', attrs={'name': 'twitter:image'}) or soup.find('meta', property='twitter:image')
+                if tw_img and tw_img.get('content'):
+                    image_url = self._normalize_image_url(tw_img.get('content'))
+            # JSON-LD Product si aparece
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    import json
+                    data = json.loads(script.string or '{}')
+                    if isinstance(data, dict) and data.get('@type') == 'Product':
+                        name = name or data.get('name')
+                        offers = data.get('offers')
+                        if isinstance(offers, dict):
+                            try:
+                                price = float(offers.get('price', 0)) or None
+                            except Exception:
+                                pass
+                        if not image_url:
+                            img = data.get('image')
+                            if isinstance(img, str):
+                                image_url = img
+                            elif isinstance(img, list) and img:
+                                image_url = img[0]
+                        break
+                except Exception:
+                    continue
+            # Galería de imágenes: ui-pdp-image/srcset/data-zoom
+            if not image_url:
+                def pick_best_from_srcset(srcset: str) -> Optional[str]:
+                    try:
+                        candidates = []
+                        for part in (srcset or '').split(','):
+                            part = part.strip()
+                            if not part:
+                                continue
+                            bits = part.split()
+                            url = bits[0]
+                            descriptor = bits[1] if len(bits) > 1 else ''
+                            score = 0
+                            if '2x' in descriptor:
+                                score = 2000
+                            else:
+                                m = re.search(r'(\d+)w', descriptor)
+                                if m:
+                                    score = int(m.group(1))
+                            candidates.append((score, url))
+                        if candidates:
+                            candidates.sort(reverse=True)
+                            return candidates[0][1]
+                    except Exception:
+                        return None
+                for img in soup.select('img.ui-pdp-image, img.ui-pdp-gallery__figure__image, img[src*="mlstatic.com"]'):
+                    try:
+                        zoom = img.get('data-zoom')
+                        if zoom:
+                            image_url = self._normalize_image_url(zoom)
+                            break
+                        srcset = img.get('srcset')
+                        if srcset:
+                            best = pick_best_from_srcset(srcset)
+                            if best:
+                                image_url = self._normalize_image_url(best)
+                                break
+                        src = img.get('src')
+                        if src:
+                            image_url = self._normalize_image_url(src)
+                            break
+                    except Exception:
+                        continue
+            return {
+                'name': name or 'Unknown Product',
+                'price': price,
+                'platform': 'mercadolibre',
+                'url': url,
+                'image_url': self._normalize_image_url(image_url)
+            }
+        except Exception as e:
+            print(f"Fallback HTML por URL ML error: {e}")
+            return {
+                'name': 'Unknown Product',
+                'price': None,
+                'platform': 'mercadolibre',
+                'url': url,
+                'image_url': None
+            }
+
+    def _scrape_mercadolibre_reviews(self, item_id: str, max_reviews: int = 50) -> List[Dict]:
+        """Intento de scraping básico de reseñas desde la página del artículo.
+        Si no se puede, devuelve lista vacía para no bloquear el análisis."""
+        try:
+            # Derivar dominio por prefijo del item_id
+            prefix = (item_id[:3] or '').upper()
+            tld_map = {
+                'MLA': 'com.ar',
+                'MLB': 'com.br',
+                'MLM': 'com.mx',
+                'MLC': 'cl',
+                'MCO': 'com.co',
+                'MLU': 'com.uy',
+                'MLV': 'com.ve',
+                'MPE': 'com.pe',
+            }
+            tld = tld_map.get(prefix, 'com.ar')
+            article_url = f"https://articulo.mercadolibre.{tld}/{item_id}"
+            resp = self._request_get(article_url, timeout=15, retries=1)
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            reviews: List[Dict] = []
+            # Mercado Libre suele renderizar reseñas dinámicamente; intentamos capturar snippets visibles
+            for block in soup.select('div.review')[:max_reviews]:
+                try:
+                    text = (block.get_text() or '').strip()
+                    if not text:
+                        continue
+                    # Rating si está disponible como estrellas
+                    rating = None
+                    star_el = block.select_one('[aria-label*="estrellas"], [aria-label*="stars"]')
+                    if star_el and star_el.get('aria-label'):
+                        m = re.search(r"(\d+(?:\.\d+)?)", star_el.get('aria-label'))
+                        if m:
+                            rating = float(m.group(1))
+                    reviews.append({
+                        'user_name': 'Anonymous',
+                        'rating': rating or 3.0,
+                        'text': text,
+                        'review_date': datetime.utcnow(),
+                        'platform': 'mercadolibre'
+                    })
+                except Exception:
+                    continue
+            return reviews
+        except Exception as e:
+            print(f"Fallback reseñas HTML ML error: {e}")
+            return []
+
+    # Actualiza scrape_product para usar API si es ML; resto comentado
+    def scrape_product(self, url: str) -> Dict:
+        platform = self.detect_platform(url)
+        if platform == 'mercadolibre':
+            item_id = self._extract_meli_item_id(url)
+            if item_id:
+                return self.scrape_product_api(item_id)
+            else:
+                # Intentar scraper mínimo por la URL directa
+                return self._scrape_mercadolibre_html_by_url(url)
+        # Fallback genérico comentado: centrarnos en ML.
+        # try:
+        #     resp = self._request_get(url, timeout=15, retries=1)
+        #     soup = BeautifulSoup(resp.text, 'html.parser')
+        #     name = None
+        #     image_url = None
+        #     price = None
+        #     # OG
+        #     og_title = soup.find('meta', property='og:title')
+        #     if og_title:
+        #         name = og_title.get('content')
+        #     og_image = soup.find('meta', property='og:image')
+        #     if og_image:
+        #         image_url = og_image.get('content')
+        #     # JSON-LD Product
+        #     for script in soup.find_all('script', type='application/ld+json'):
+        #         try:
+        #             import json
+        #             data = json.loads(script.string or '{}')
+        #             if isinstance(data, dict) and data.get('@type') == 'Product':
+        #                 name = name or data.get('name')
+        #                 offers = data.get('offers')
+        #                 if isinstance(offers, dict):
+        #                     price = price or float(offers.get('price', 0)) or None
+        #                 if not image_url and isinstance(data.get('image'), (str, list)):
+        #                     image_url = data.get('image')[0] if isinstance(data.get('image'), list) else data.get('image')
+        #                 break
+        #         except Exception:
+        #             continue
+        #     parsed = urlparse(url)
+        #     return {
+        #         'name': name or (parsed.hostname or 'Unknown Product'),
+        #         'price': price,
+        #         'platform': platform,
+        #         'url': url,
+        #         'image_url': image_url
+        #     }
+        # except Exception as e:
+        #     print(f"Fallback genérico producto error: {e}")
+        #     return {
+        #         'name': 'Unknown Product',
+        #         'price': None,
+        #         'platform': platform,
+        #         'url': url,
+        #         'image_url': None
+        #     }
+
+    def scrape_reviews(self, url: str, max_reviews: int = 50) -> List[Dict]:
+        platform = self.detect_platform(url)
+        if platform == 'mercadolibre':
+            item_id = self._extract_meli_item_id(url)
+            if item_id:
+                return self.scrape_reviews_api(item_id, max_reviews)
+            else:
+                print(f"[Scraper] No se pudo extraer item_id de URL ML para reseñas: {url}")
+        # Fallback para otras plataformas comentado: nos centramos en ML.
+        return []
+
+    # Resto de tu código original (detect_platform, _scrape_amazon_reviews, templates, etc.)
+
+# Singleton
 scraper = ProductScraper()

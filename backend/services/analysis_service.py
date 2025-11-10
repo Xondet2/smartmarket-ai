@@ -1,41 +1,88 @@
-from typing import Dict
+from typing import Dict, Optional
 from sqlalchemy.orm import Session
 from database.models import Product, Review, AnalysisResult
 from services.scraper import scraper
 from services.sentiment_analyzer import sentiment_analyzer
-from services.price_comparator import price_comparator
+# Eliminamos comparación de precios para enfocarnos en opiniones
 from datetime import datetime
 
 class AnalysisService:
-    """
-    Orchestrates the complete product analysis workflow
-    """
-    
-    async def analyze_product_complete(self, product_id: int, db: Session) -> Dict:
-        """
-        Complete analysis workflow:
-        1. Get or scrape product info
-        2. Scrape reviews
-        3. Analyze sentiment
-        4. Compare prices
-        5. Save results
-        """
-        # Get product from database
+    async def analyze_product_complete(self, product_id: int, db: Session, user_id: Optional[int] = None) -> Dict:
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product:
-            raise ValueError(f"Product {product_id} not found")
+            raise ValueError(f"Producto {product_id} no encontrado")
         
-        # Step 1: Update product info if needed
-        if product.name == "Analyzing..." or not product.name:
-            product_info = scraper.scrape_product(product.url)
-            product.name = product_info.get('name', 'Unknown Product')
-            db.commit()
+        # Update product info with API/scraping
+        product_info = scraper.scrape_product(product.url)
+        # Actualizar nombre: preferir nombre válido del scraper, si no derivar del slug de la URL
+        scraped_name = product_info.get('name')
+        def derive_from_url(url: str) -> str:
+            try:
+                from urllib.parse import urlparse
+                import re
+                path = (urlparse(url).path or "").strip("/")
+                segments = [s for s in path.split("/") if s]
+                slug = None
+                if segments:
+                    if "p" in segments:
+                        idx = segments.index("p")
+                        if idx > 0:
+                            slug = segments[idx - 1]
+                    if not slug:
+                        m = re.search(r"/[A-Z]{3}-\d{6,}-([\w-]+)", url, re.IGNORECASE)
+                        if m:
+                            slug = m.group(1)
+                    if not slug:
+                        slug = segments[0]
+                cleanup_phrases = [
+                    "distribuidor-autorizado",
+                    "tienda-oficial",
+                    "envio-gratis",
+                    "nuevo",
+                    "original",
+                    "importado",
+                ]
+                if slug:
+                    for phrase in cleanup_phrases:
+                        if slug.endswith("-" + phrase):
+                            slug = slug[: -len("-" + phrase)]
+                            break
+                    pretty = slug.replace('-', ' ').strip()
+                    return pretty.title() if pretty else "Unknown Product"
+            except Exception:
+                pass
+            return "Unknown Product"
+        if scraped_name and str(scraped_name).strip().lower() not in {"unknown product", "unknown", "undefined"}:
+            product.name = scraped_name
+        else:
+            product.name = derive_from_url(product.url)
+        # Imagen: si no viene, intentar obtener desde la URL directa (OG/JSON-LD)
+        image_candidate = product_info.get('image_url')
+        if not image_candidate:
+            try:
+                alt = scraper._scrape_mercadolibre_html_by_url(product.url)
+                image_candidate = alt.get('image_url')
+            except Exception:
+                image_candidate = None
+        product.image_url = image_candidate or product.image_url
+        # Guardar precio si viene del scraper
+        if product_info.get('price') is not None:
+            try:
+                product.price = float(product_info.get('price'))
+            except (TypeError, ValueError):
+                pass
+        # Guardar rating oficial si viene del scraper
+        if product_info.get('rating') is not None:
+            try:
+                product.rating = float(product_info.get('rating'))
+            except (TypeError, ValueError):
+                pass
+        db.commit()
         
-        # Step 2: Scrape reviews
-        print(f"Scraping reviews for {product.name}...")
+        # Scrape reviews with API priority
         scraped_reviews = scraper.scrape_reviews(product.url, max_reviews=50)
         
-        # Save reviews to database
+        # Save reviews
         for review_data in scraped_reviews:
             review = Review(
                 product_id=product.id,
@@ -48,28 +95,23 @@ class AnalysisService:
             db.add(review)
         db.commit()
         
-        # Step 3: Get all reviews for analysis
+        # Get all reviews for analysis
         all_reviews = db.query(Review).filter(Review.product_id == product.id).all()
         review_dicts = [
-            {
-                'text': r.text,
-                'rating': r.rating,
-                'date': r.review_date
-            }
+            {'text': r.text, 'rating': r.rating, 'review_date': r.review_date}
             for r in all_reviews
         ]
         
-        # Step 4: Analyze sentiment
-        print(f"Analyzing sentiment for {len(review_dicts)} reviews...")
+        # Sentiment analysis with IA
         sentiment_results = sentiment_analyzer.analyze_reviews(review_dicts)
         
-        # Step 5: Compare prices
-        print(f"Comparing prices...")
-        price_data = price_comparator.compare_prices(product.name)
+        # Sin comparación de precios: mantenemos price_data como None
+        price_data = None
         
-        # Step 6: Save analysis results
+        # Save analysis
         analysis = AnalysisResult(
             product_id=product.id,
+            user_id=user_id,
             avg_sentiment=sentiment_results['avg_sentiment'],
             sentiment_label=sentiment_results['sentiment_label'],
             total_reviews=sentiment_results['total_reviews'],
@@ -84,16 +126,14 @@ class AnalysisService:
         db.commit()
         db.refresh(analysis)
         
-        print(f"Analysis complete for {product.name}")
-        
         return {
             'product_id': product.id,
             'product_name': product.name,
             'analysis_id': analysis.id,
             'sentiment': sentiment_results,
-            'prices': price_data,
+            # prices eliminado; mantenemos estructura centrada en sentimientos
             'status': 'completed'
         }
 
-# Singleton instance
+# Singleton
 analysis_service = AnalysisService()

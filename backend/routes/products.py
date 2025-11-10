@@ -11,7 +11,7 @@ router = APIRouter()
 
 class ProductRequest(BaseModel):
     url: str
-    platform: Optional[str] = "amazon"
+    platform: Optional[str] = "mercadolibre"
     name: Optional[str] = None
 
 class ProductResponse(BaseModel):
@@ -19,6 +19,8 @@ class ProductResponse(BaseModel):
     name: str
     platform: str
     url: str
+    image_url: Optional[str] = None
+    price: Optional[float] = None
     created_at: datetime
     
     class Config:
@@ -30,21 +32,14 @@ async def search_products(
     platforms: Optional[List[str]] = None
 ):
     """
-    Search for products by name across multiple platforms
-    Returns comparison results from different stores
+    Búsqueda de productos por nombre.
+    Actualmente no implementado para múltiples plataformas; se recomienda usar URL directa de Mercado Libre.
     """
     if not product_name or not product_name.strip():
         raise HTTPException(status_code=400, detail="Product name is required")
     
-    try:
-        results = scraper.search_product_by_name(product_name.strip(), platforms)
-        
-        if not results:
-            raise HTTPException(status_code=404, detail="No products found")
-        
-        return results
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+    # Deshabilitado: la búsqueda multi-plataforma fue retirada para centrarse en Mercado Libre.
+    raise HTTPException(status_code=501, detail="Search by name is not implemented. Use Mercado Libre product URL.")
 
 @router.post("/", response_model=ProductResponse)
 async def create_product(product: ProductRequest, db: Session = Depends(get_db)):

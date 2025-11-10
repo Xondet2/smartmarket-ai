@@ -39,6 +39,9 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class UserUpdate(BaseModel):
+    full_name: str | None = None
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
     """Register a new user."""
@@ -122,15 +125,13 @@ def get_me(current_user: User = Depends(get_current_user)):
 
 @router.put("/me", response_model=UserResponse)
 def update_me(
-    full_name: str = None,
+    user_update: UserUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Update current user information."""
-    if full_name:
-        current_user.full_name = full_name
-    
+    if user_update.full_name:
+        current_user.full_name = user_update.full_name
     db.commit()
     db.refresh(current_user)
-    
     return current_user

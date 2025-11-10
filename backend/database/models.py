@@ -2,7 +2,6 @@ from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKe
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database.db_config import Base
-
 class User(Base):
     __tablename__ = "users"
     
@@ -27,6 +26,8 @@ class Product(Base):
     platform = Column(String(50), nullable=False)
     url = Column(Text, nullable=False, unique=True)
     image_url = Column(Text)
+    price = Column(Float, nullable=True)
+    rating = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

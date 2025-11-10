@@ -1,28 +1,15 @@
-from typing import List, Dict, Tuple
-from transformers import pipeline
-import numpy as np
+from typing import List, Dict, Optional
 from utils.helpers import clean_text, extract_keywords, calculate_sentiment_label
 
 class SentimentAnalyzer:
     """
-    AI-powered sentiment analysis using Hugging Face transformers
-    Analyzes product reviews to determine customer satisfaction
+    Lightweight sentiment analysis without heavy ML dependencies.
+    Uses cleaned text, simple lexicons, and keyword extraction.
     """
     
     def __init__(self):
-        # Initialize sentiment analysis pipeline
-        # Using a lightweight model for faster inference
-        try:
-            self.sentiment_pipeline = pipeline(
-                "sentiment-analysis",
-                model="distilbert-base-uncased-finetuned-sst-2-english",
-                device=-1  # Use CPU
-            )
-            self.model_loaded = True
-        except Exception as e:
-            print(f"Warning: Could not load sentiment model: {e}")
-            print("Using fallback sentiment analysis")
-            self.model_loaded = False
+        # No heavy model initialization; keep analyzer lightweight.
+        pass
     
     def analyze_reviews(self, reviews: List[Dict]) -> Dict:
         """
@@ -37,29 +24,33 @@ class SentimentAnalyzer:
         if not reviews:
             return self._empty_analysis()
         
-        # Extract review texts
-        review_texts = [clean_text(r.get('text', '')) for r in reviews]
-        review_texts = [text for text in review_texts if text]  # Remove empty
-        
-        if not review_texts:
+        # Analyze each review, combining text and rating when available
+        cleaned_reviews: List[Dict] = []
+        for r in reviews:
+            cleaned_reviews.append({
+                'text': clean_text(r.get('text', '')),
+                'rating': float(r.get('rating', 0) or 0),
+                'review_date': r.get('review_date')
+            })
+
+        # If still empty list, return baseline
+        if not cleaned_reviews:
             return self._empty_analysis()
-        
-        # Analyze sentiments
-        sentiments = []
-        for text in review_texts:
-            sentiment = self._analyze_single_review(text)
-            sentiments.append(sentiment)
-        
-        # Calculate aggregate statistics
-        avg_sentiment = np.mean([s['score'] for s in sentiments])
+
+        sentiments = [self._analyze_single_review(cr['text'], cr['rating']) for cr in cleaned_reviews]
+
+        # Calculate aggregate statistics without numpy
+        scores = [s['score'] for s in sentiments]
+        avg_sentiment = sum(scores) / len(scores) if scores else 0.5
         
         # Count sentiment categories
         positive_count = sum(1 for s in sentiments if s['label'] == 'positive')
         negative_count = sum(1 for s in sentiments if s['label'] == 'negative')
         neutral_count = len(sentiments) - positive_count - negative_count
         
-        # Extract keywords from all reviews
-        all_text = ' '.join(review_texts)
+        # Extract keywords only from non-empty texts
+        all_texts = [cr['text'] for cr in cleaned_reviews if cr['text']]
+        all_text = ' '.join(all_texts)
         keywords = extract_keywords(all_text, top_n=15)
         
         # Determine overall sentiment label
@@ -74,43 +65,33 @@ class SentimentAnalyzer:
             'neutral_count': neutral_count,
             'keywords': keywords,
             'sentiment_distribution': {
-                'positive': round(positive_count / len(sentiments) * 100, 1),
-                'negative': round(negative_count / len(sentiments) * 100, 1),
-                'neutral': round(neutral_count / len(sentiments) * 100, 1)
+                'positive': round((positive_count / len(sentiments)) * 100, 1) if sentiments else 0.0,
+                'negative': round((negative_count / len(sentiments)) * 100, 1) if sentiments else 0.0,
+                'neutral': round((neutral_count / len(sentiments)) * 100, 1) if sentiments else 0.0
             }
         }
     
-    def _analyze_single_review(self, text: str) -> Dict:
+    def _analyze_single_review(self, text: str, rating: Optional[float] = None) -> Dict:
         """
-        Analyze sentiment of a single review text
+        Analyze sentiment of a single review combining text signals and star rating.
         """
-        if not text:
-            return {'label': 'neutral', 'score': 0.5}
-        
-        if self.model_loaded:
-            try:
-                # Use transformer model
-                # Truncate text to model's max length
-                text = text[:512]
-                result = self.sentiment_pipeline(text)[0]
-                
-                # Convert to 0-1 scale
-                if result['label'] == 'POSITIVE':
-                    score = (result['score'] + 1) / 2  # Map to 0.5-1.0
-                else:
-                    score = (1 - result['score']) / 2  # Map to 0.0-0.5
-                
-                label = 'positive' if score >= 0.6 else ('negative' if score <= 0.4 else 'neutral')
-                
-                return {
-                    'label': label,
-                    'score': score
-                }
-            except Exception as e:
-                print(f"Error in model inference: {e}")
-                return self._fallback_sentiment(text)
+        text_sent = self._fallback_sentiment(text or "")
+
+        # Normalize rating to [0,1] if provided (ML uses 1-5 scale)
+        rating_norm: Optional[float] = None
+        if rating is not None and rating > 0:
+            rating_norm = max(0.0, min(1.0, float(rating) / 5.0))
+
+        # Combine signals: if text has no signal, rely on rating; otherwise average
+        if rating_norm is None:
+            combined_score = text_sent['score']
+        elif text_sent['score'] == 0.5 and (text or "").strip() == "":
+            combined_score = rating_norm
         else:
-            return self._fallback_sentiment(text)
+            combined_score = (text_sent['score'] + rating_norm) / 2.0
+
+        label = calculate_sentiment_label(combined_score)
+        return { 'label': label, 'score': combined_score }
     
     def _fallback_sentiment(self, text: str) -> Dict:
         """
@@ -118,21 +99,23 @@ class SentimentAnalyzer:
         """
         text_lower = text.lower()
         
-        # Positive and negative word lists
+        # Positive and negative word lists (English + Spanish)
         positive_words = {
-            'good', 'great', 'excellent', 'amazing', 'wonderful', 'fantastic',
-            'love', 'perfect', 'best', 'awesome', 'outstanding', 'superb',
-            'happy', 'satisfied', 'recommend', 'quality', 'fast', 'easy'
+            # EN
+            'good','great','excellent','amazing','wonderful','fantastic','love','perfect','best','awesome','outstanding','superb','happy','satisfied','recommend','quality','fast','easy',
+            # ES
+            'bueno','excelente','increible','maravilloso','fantastico','mejor','perfecto','encanta','recomiendo','satisfecho','feliz','calidad','rapido','facil','cumple','funciona','genial'
         }
         
         negative_words = {
-            'bad', 'terrible', 'awful', 'horrible', 'worst', 'poor', 'hate',
-            'disappointed', 'waste', 'broken', 'defective', 'useless', 'slow',
-            'difficult', 'problem', 'issue', 'never', 'not', 'don\'t'
+            # EN
+            'bad','terrible','awful','horrible','worst','poor','hate','disappointed','waste','broken','defective','useless','slow','difficult','problem','issue','never','not',"don't",
+            # ES
+            'malo','terrible','horrible','peor','defectuoso','roto','lento','dificil','problema','fallo','nunca','no','decepcionado','odio','pobre','nofunciona','engaño','estafa'
         }
         
         # Count positive and negative words
-        words = text_lower.split()
+        words = text_lower.replace('no funciona','nofunciona').split()
         positive_count = sum(1 for word in words if word in positive_words)
         negative_count = sum(1 for word in words if word in negative_words)
         

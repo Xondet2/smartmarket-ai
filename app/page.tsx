@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { SearchBar } from "@/components/search-bar"
 import { AnalysisResults } from "@/components/analysis-results"
 import { RecentAnalyses } from "@/components/recent-analyses"
@@ -53,6 +53,15 @@ export default function Home() {
       setIsAnalyzing(false)
     }
   }
+
+  // Ensure the header with charts is visible when selecting an analysis
+  useEffect(() => {
+    if (analysisData && !isAnalyzing) {
+      try {
+        window.scrollTo({ top: 0, behavior: "smooth" })
+      } catch {}
+    }
+  }, [analysisData, isAnalyzing])
 
   return (
     <div className="min-h-screen bg-background">

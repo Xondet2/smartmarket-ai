@@ -1,10 +1,13 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "")
 
 export interface Product {
   id: number
   name: string
   platform: string
   url: string
+  image_url?: string
+  price?: number
+  rating?: number
   created_at: string
 }
 
@@ -21,6 +24,9 @@ export interface AnalysisResult {
   id: number
   product_id: number
   product_name: string // Added product_name field
+  product_price?: number
+  product_image_url?: string
+  product_rating?: number
   avg_sentiment: number
   sentiment_label: string
   total_reviews: number
@@ -52,10 +58,12 @@ class ApiService {
     this.baseUrl = baseUrl
   }
 
-  private getAuthHeaders(): HeadersInit {
+  private getAuthHeaders(includeJsonContentType = false): HeadersInit {
     const token = typeof window !== "undefined" ? localStorage.getItem("smartmarket_token") : null
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
+    const headers: HeadersInit = {}
+
+    if (includeJsonContentType) {
+      headers["Content-Type"] = "application/json"
     }
 
     if (token) {
@@ -97,7 +105,7 @@ class ApiService {
   async get<T>(endpoint: string): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: "GET",
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(false),
     })
     return this.handleResponse<T>(response)
   }
@@ -105,7 +113,7 @@ class ApiService {
   async post<T>(endpoint: string, data: any): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: "POST",
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(true),
       body: JSON.stringify(data),
     })
     return this.handleResponse<T>(response)
@@ -114,7 +122,7 @@ class ApiService {
   async put<T>(endpoint: string, data: any): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: "PUT",
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(true),
       body: JSON.stringify(data),
     })
     return this.handleResponse<T>(response)
@@ -123,7 +131,7 @@ class ApiService {
   async delete<T>(endpoint: string): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: "DELETE",
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(false),
     })
     return this.handleResponse<T>(response)
   }

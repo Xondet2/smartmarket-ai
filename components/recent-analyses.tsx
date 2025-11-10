@@ -17,6 +17,7 @@ export function RecentAnalyses({ onSelectAnalysis }: RecentAnalysesProps) {
   const { analyses, isLoading, error, refresh } = useRecentAnalyses(6)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [clearingAll, setClearingAll] = useState(false)
+  const [loadingSelectionId, setLoadingSelectionId] = useState<number | null>(null)
 
   const getSentimentIcon = (label: string) => {
     switch (label) {
@@ -78,6 +79,20 @@ export function RecentAnalyses({ onSelectAnalysis }: RecentAnalysesProps) {
     return null
   }
 
+  const handleSelect = async (analysis: any) => {
+    try {
+      setLoadingSelectionId(analysis.id)
+      // Fetch latest full analysis from backend to ensure charts and data are up to date
+      const fresh = await api.getAnalysis(analysis.product_id)
+      onSelectAnalysis(fresh)
+    } catch (err) {
+      // Fallback to existing item if network fails
+      onSelectAnalysis(analysis)
+    } finally {
+      setLoadingSelectionId(null)
+    }
+  }
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
@@ -98,7 +113,9 @@ export function RecentAnalyses({ onSelectAnalysis }: RecentAnalysesProps) {
           <Card
             key={analysis.id}
             className="group relative cursor-pointer p-4 transition-colors hover:bg-muted/50"
-            onClick={() => onSelectAnalysis(analysis)}
+            onClick={() => handleSelect(analysis)}
+            aria-busy={loadingSelectionId === analysis.id}
+            aria-label={`Abrir análisis de ${analysis.product_name}`}
           >
             <Button
               variant="ghost"
@@ -109,8 +126,26 @@ export function RecentAnalyses({ onSelectAnalysis }: RecentAnalysesProps) {
             >
               <X className="h-4 w-4" />
             </Button>
-
-            <h4 className="mb-2 line-clamp-2 pr-8 text-sm font-semibold text-foreground">{analysis.product_name}</h4>
+            <div className="mb-2 flex items-start gap-3">
+              {analysis.product_image_url && (
+                <img
+                  src={analysis.product_image_url}
+                  alt={analysis.product_name || 'Product'}
+                  className="h-12 w-12 rounded-md object-cover"
+                />
+              )}
+              <div className="flex-1">
+                <h4 className="line-clamp-2 pr-8 text-sm font-semibold text-foreground">{analysis.product_name}</h4>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {typeof analysis.product_price === 'number' && (
+                    <p className="text-xs text-muted-foreground">Precio: ${analysis.product_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  )}
+                  {typeof analysis.product_rating === 'number' && (
+                    <p className="text-xs text-muted-foreground">Rating: {analysis.product_rating.toFixed(1)} / 5.0</p>
+                  )}
+                </div>
+              </div>
+            </div>
 
             <div className="mb-3 flex items-start justify-between">
               <div className="flex items-center gap-2">

@@ -38,8 +38,28 @@ export function AnalysisResults({ data }: AnalysisResultsProps) {
     <div className="space-y-6">
       {/* Header */}
       <div className="rounded-lg border border-border bg-card p-6">
-        <h2 className="mb-2 text-2xl font-bold text-foreground">Analysis Results</h2>
-        <p className="text-muted-foreground">Based on {data.total_reviews} customer reviews</p>
+        <div className="flex items-start gap-4">
+          {data.product_image_url && (
+            <img
+              src={data.product_image_url}
+              alt={data.product_name || 'Product image'}
+              className="h-16 w-16 flex-shrink-0 rounded-md object-cover"
+            />
+          )}
+          <div className="flex-1">
+            <h2 className="mb-1 text-2xl font-bold text-foreground">Analysis Results</h2>
+            {data.product_name && (
+              <p className="mb-1 text-sm text-muted-foreground">Product: {data.product_name}</p>
+            )}
+            {typeof data.product_price === 'number' && (
+              <p className="mb-1 text-sm text-muted-foreground">Price: ${data.product_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            )}
+            {typeof data.product_rating === 'number' && (
+              <p className="text-sm text-muted-foreground">Official Rating: {data.product_rating.toFixed(1)} / 5.0</p>
+            )}
+            <p className="text-muted-foreground">Based on {data.total_reviews} customer reviews</p>
+          </div>
+        </div>
       </div>
 
       {/* Overall Sentiment */}
@@ -71,7 +91,7 @@ export function AnalysisResults({ data }: AnalysisResultsProps) {
           <p className="mb-2 text-sm font-medium text-muted-foreground">Positive Reviews</p>
           <p className="text-3xl font-bold text-green-500">{data.positive_count}</p>
           <p className="text-sm text-muted-foreground">
-            {((data.positive_count / data.total_reviews) * 100).toFixed(1)}%
+            {data.total_reviews ? ((data.positive_count / data.total_reviews) * 100).toFixed(1) : '0.0'}%
           </p>
         </Card>
 
@@ -79,7 +99,7 @@ export function AnalysisResults({ data }: AnalysisResultsProps) {
           <p className="mb-2 text-sm font-medium text-muted-foreground">Neutral Reviews</p>
           <p className="text-3xl font-bold text-yellow-500">{data.neutral_count}</p>
           <p className="text-sm text-muted-foreground">
-            {((data.neutral_count / data.total_reviews) * 100).toFixed(1)}%
+            {data.total_reviews ? ((data.neutral_count / data.total_reviews) * 100).toFixed(1) : '0.0'}%
           </p>
         </Card>
 
@@ -87,7 +107,7 @@ export function AnalysisResults({ data }: AnalysisResultsProps) {
           <p className="mb-2 text-sm font-medium text-muted-foreground">Negative Reviews</p>
           <p className="text-3xl font-bold text-red-500">{data.negative_count}</p>
           <p className="text-sm text-muted-foreground">
-            {((data.negative_count / data.total_reviews) * 100).toFixed(1)}%
+            {data.total_reviews ? ((data.negative_count / data.total_reviews) * 100).toFixed(1) : '0.0'}%
           </p>
         </Card>
       </div>

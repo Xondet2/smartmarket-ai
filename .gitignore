@@ -54,3 +54,6 @@ backend/.coverage
 # OS
 .DS_Store
 Thumbs.db
+
+.vercel
+smartmarket.db

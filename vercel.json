@@ -1,0 +1,10 @@
+{
+  "installCommand": "pnpm install --no-frozen-lockfile --prefer-offline",
+  "buildCommand": "pnpm run build",
+  "devCommand": "pnpm run dev",
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "env": {
+    "NEXT_PUBLIC_API_URL": "https://smartmarket-backend-production.up.railway.app/"
+  }
+}

@@ -7,6 +7,8 @@ import time
 import random
 import os
 from urllib.parse import urlparse, parse_qs
+from utils.metrics import SCRAPE_REQUESTS, SCRAPE_DURATION, API_ERRORS
+from utils.logging import get_logger
 """
 NOTA: Este módulo ha sido simplificado para centrarse en la API oficial
 de Mercado Libre. El scraping de otras plataformas (Amazon/eBay/AliExpress)
@@ -31,6 +33,7 @@ class ProductScraper:
         self.site_id = os.getenv('MERCADO_LIBRE_SITE_ID', 'MLA')
         # Modo estricto: usar solo la API oficial; no complementar con HTML
         self.strict_api = str(os.getenv('MELI_STRICT_API', 'false')).lower() in {"1", "true", "yes"}
+        self.logger = get_logger("services.scraper")
 
     # ----------------------------
     # Helpers internos
@@ -41,6 +44,7 @@ class ProductScraper:
         last_exc = None
         for attempt in range(retries + 1):
             try:
+                SCRAPE_REQUESTS.inc()
                 resp = requests.get(url, headers=hdrs, timeout=timeout)
                 resp.raise_for_status()
                 return resp
@@ -139,6 +143,7 @@ class ProductScraper:
         url = f"https://api.mercadolibre.com/items/{item_id}"
         headers = {**self.headers, 'Authorization': f'Bearer {self.access_token}'}
         try:
+            t0 = time.time()
             response = self._request_get(url, headers=headers, timeout=15, retries=2)
             data = response.json()
             # Nombre robusto: si falta en la API, intentar HTML fallback
@@ -151,7 +156,7 @@ class ProductScraper:
                 except Exception:
                     pass
 
-            return {
+            res = {
                 'name': api_name or 'Unknown Product',
                 'price': data.get('price', None),
                 'platform': 'mercadolibre',
@@ -162,8 +167,11 @@ class ProductScraper:
                 'reviews_count': (data.get('reviews', {}) or {}).get('total', 0),
                 'rating': (data.get('reviews', {}) or {}).get('rating_average', None),
             }
+            SCRAPE_DURATION.observe(time.time() - t0)
+            return res
         except requests.exceptions.RequestException as e:
-            print(f"Error API producto ML: {e}. Cayendo a scraping.")
+            API_ERRORS.labels(endpoint="scrape_product_api").inc()
+            self.logger.error({"event": "scrape_product_api_error", "item_id": item_id, "error": str(e)})
             return self._scrape_mercadolibre_html(item_id)  # Fallback HTML básico
 
     def scrape_reviews_api(self, item_id: str, max_reviews: int = 50) -> List[Dict]:
@@ -173,6 +181,7 @@ class ProductScraper:
         url = f"https://api.mercadolibre.com/reviews/item/{item_id}?limit={max_reviews}"
         headers = {**self.headers, 'Authorization': f'Bearer {self.access_token}'}
         try:
+            t0 = time.time()
             response = self._request_get(url, headers=headers, timeout=15, retries=2)
             data = response.json()
             reviews = []
@@ -185,9 +194,11 @@ class ProductScraper:
                     'platform': 'mercadolibre'
                 })
             time.sleep(random.uniform(1, 2))  # Delay para rate limit
+            SCRAPE_DURATION.observe(time.time() - t0)
             return reviews
         except requests.exceptions.RequestException as e:
-            print(f"Error API reseñas ML: {e}. Cayendo a scraping.")
+            API_ERRORS.labels(endpoint="scrape_reviews_api").inc()
+            self.logger.error({"event": "scrape_reviews_api_error", "item_id": item_id, "error": str(e)})
             return self._scrape_mercadolibre_reviews(f"https://articulo.mercadolibre.com.ar/{item_id}", max_reviews)
 
     # ----------------------------
@@ -292,7 +303,8 @@ class ProductScraper:
                 'image_url': self._normalize_image_url(image_url)
             }
         except Exception as e:
-            print(f"Fallback HTML ML error: {e}")
+            API_ERRORS.labels(endpoint="scrape_product_html_fallback").inc()
+            self.logger.error({"event": "scrape_product_html_fallback_error", "item_id": item_id, "error": str(e)})
             return {
                 'name': 'Unknown Product',
                 'price': None,
@@ -392,7 +404,8 @@ class ProductScraper:
                 'image_url': self._normalize_image_url(image_url)
             }
         except Exception as e:
-            print(f"Fallback HTML por URL ML error: {e}")
+            API_ERRORS.labels(endpoint="scrape_product_html_by_url_fallback").inc()
+            self.logger.error({"event": "scrape_product_html_by_url_error", "url": url, "error": str(e)})
             return {
                 'name': 'Unknown Product',
                 'price': None,
@@ -446,7 +459,8 @@ class ProductScraper:
                     continue
             return reviews
         except Exception as e:
-            print(f"Fallback reseñas HTML ML error: {e}")
+            API_ERRORS.labels(endpoint="scrape_reviews_html_fallback").inc()
+            self.logger.error({"event": "scrape_reviews_html_fallback_error", "item_id": item_id, "error": str(e)})
             return []
 
     # Actualiza scrape_product para usar API si es ML; resto comentado
@@ -513,11 +527,12 @@ class ProductScraper:
             if item_id:
                 return self.scrape_reviews_api(item_id, max_reviews)
             else:
-                print(f"[Scraper] No se pudo extraer item_id de URL ML para reseñas: {url}")
+                self.logger.warning("No se pudo extraer item_id de URL ML para reseñas: %s", url)
+                API_ERRORS.labels(endpoint="scraper").inc()
         # Fallback para otras plataformas comentado: nos centramos en ML.
         return []
 
     # Resto de tu código original (detect_platform, _scrape_amazon_reviews, templates, etc.)
 
-# Singleton
+# Instancia singleton
 scraper = ProductScraper()

@@ -1,30 +1,35 @@
+"""
+Resumen del módulo:
+- Servicio de análisis de sentimiento ligero (reglas y lexicón simple).
+- Patrón: clase con métodos puros y una instancia singleton reutilizable.
+"""
 from typing import List, Dict, Optional
 from utils.helpers import clean_text, extract_keywords, calculate_sentiment_label
 
 class SentimentAnalyzer:
     """
-    Lightweight sentiment analysis without heavy ML dependencies.
-    Uses cleaned text, simple lexicons, and keyword extraction.
+    Análisis de sentimiento ligero sin dependencias de ML pesadas.
+    Usa texto limpiado, léxicos simples y extracción de palabras clave.
     """
     
     def __init__(self):
-        # No heavy model initialization; keep analyzer lightweight.
+        # Sin inicialización de modelos pesados; mantener el analizador ligero.
         pass
     
     def analyze_reviews(self, reviews: List[Dict]) -> Dict:
         """
-        Analyze a list of reviews and return comprehensive sentiment analysis
+        Analiza una lista de reseñas y devuelve un análisis de sentimiento completo.
         
         Args:
-            reviews: List of review dictionaries with 'text' and 'rating' fields
+            reviews: Lista de diccionarios de reseñas con campos 'text' y 'rating'.
         
         Returns:
-            Dictionary with sentiment scores, counts, and keywords
+            Diccionario con puntajes de sentimiento, conteos y palabras clave.
         """
         if not reviews:
             return self._empty_analysis()
         
-        # Analyze each review, combining text and rating when available
+        # Analiza cada reseña, combinando texto y rating cuando esté disponible.
         cleaned_reviews: List[Dict] = []
         for r in reviews:
             cleaned_reviews.append({
@@ -33,27 +38,27 @@ class SentimentAnalyzer:
                 'review_date': r.get('review_date')
             })
 
-        # If still empty list, return baseline
+        # Si aún está vacía la lista, devuelve valores base.
         if not cleaned_reviews:
             return self._empty_analysis()
 
         sentiments = [self._analyze_single_review(cr['text'], cr['rating']) for cr in cleaned_reviews]
 
-        # Calculate aggregate statistics without numpy
+        # Calcula estadísticas agregadas sin numpy.
         scores = [s['score'] for s in sentiments]
         avg_sentiment = sum(scores) / len(scores) if scores else 0.5
         
-        # Count sentiment categories
+        # Cuenta categorías de sentimiento.
         positive_count = sum(1 for s in sentiments if s['label'] == 'positive')
         negative_count = sum(1 for s in sentiments if s['label'] == 'negative')
         neutral_count = len(sentiments) - positive_count - negative_count
         
-        # Extract keywords only from non-empty texts
+        # Extrae palabras clave solo de textos no vacíos.
         all_texts = [cr['text'] for cr in cleaned_reviews if cr['text']]
         all_text = ' '.join(all_texts)
         keywords = extract_keywords(all_text, top_n=15)
         
-        # Determine overall sentiment label
+        # Determina etiqueta de sentimiento general.
         sentiment_label = calculate_sentiment_label(avg_sentiment)
         
         return {
@@ -73,16 +78,16 @@ class SentimentAnalyzer:
     
     def _analyze_single_review(self, text: str, rating: Optional[float] = None) -> Dict:
         """
-        Analyze sentiment of a single review combining text signals and star rating.
+        Analiza el sentimiento de una reseña combinando señales del texto y calificación.
         """
         text_sent = self._fallback_sentiment(text or "")
 
-        # Normalize rating to [0,1] if provided (ML uses 1-5 scale)
+        # Normaliza el rating a [0,1] si se proporciona (escala 1-5).
         rating_norm: Optional[float] = None
         if rating is not None and rating > 0:
             rating_norm = max(0.0, min(1.0, float(rating) / 5.0))
 
-        # Combine signals: if text has no signal, rely on rating; otherwise average
+        # Combina señales: si el texto no tiene señal, usar el rating; si no, promediar.
         if rating_norm is None:
             combined_score = text_sent['score']
         elif text_sent['score'] == 0.5 and (text or "").strip() == "":
@@ -95,11 +100,11 @@ class SentimentAnalyzer:
     
     def _fallback_sentiment(self, text: str) -> Dict:
         """
-        Simple rule-based sentiment analysis as fallback
+        Análisis de sentimiento simple basado en reglas como respaldo.
         """
         text_lower = text.lower()
         
-        # Positive and negative word lists (English + Spanish)
+        # Listas de palabras positivas y negativas (inglés + español).
         positive_words = {
             # EN
             'good','great','excellent','amazing','wonderful','fantastic','love','perfect','best','awesome','outstanding','superb','happy','satisfied','recommend','quality','fast','easy',
@@ -114,12 +119,12 @@ class SentimentAnalyzer:
             'malo','terrible','horrible','peor','defectuoso','roto','lento','dificil','problema','fallo','nunca','no','decepcionado','odio','pobre','nofunciona','engaño','estafa'
         }
         
-        # Count positive and negative words
+        # Cuenta palabras positivas y negativas.
         words = text_lower.replace('no funciona','nofunciona').split()
         positive_count = sum(1 for word in words if word in positive_words)
         negative_count = sum(1 for word in words if word in negative_words)
         
-        # Calculate score
+        # Calcula puntaje.
         total = positive_count + negative_count
         if total == 0:
             score = 0.5
@@ -135,7 +140,7 @@ class SentimentAnalyzer:
     
     def _empty_analysis(self) -> Dict:
         """
-        Return empty analysis structure
+        Devuelve una estructura de análisis vacía.
         """
         return {
             'avg_sentiment': 0.5,
@@ -154,21 +159,21 @@ class SentimentAnalyzer:
     
     def analyze_review_trends(self, reviews: List[Dict]) -> Dict:
         """
-        Analyze sentiment trends over time
+        Analiza tendencias de sentimiento a lo largo del tiempo.
         """
         if not reviews:
             return {'trend': 'stable', 'data': []}
         
-        # Sort reviews by date
+        # Ordena reseñas por fecha.
         sorted_reviews = sorted(reviews, key=lambda x: x.get('review_date', ''))
         
-        # Group by time periods and calculate sentiment
-        # Simplified implementation
+        # Agrupa por períodos de tiempo y calcula sentimiento.
+        # Implementación simplificada.
         return {
             'trend': 'improving',
             'recent_sentiment': 0.75,
             'historical_sentiment': 0.65
         }
 
-# Singleton instance
+# Instancia singleton
 sentiment_analyzer = SentimentAnalyzer()

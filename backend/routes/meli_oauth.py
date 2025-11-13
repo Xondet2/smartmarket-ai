@@ -1,3 +1,8 @@
+"""
+Resumen del módulo:
+- OAuth con Mercado Libre usando PKCE: generación de URL, callback y canje de tokens.
+- Patrón: almacenamiento efímero `state -> verifier` y validación de expiración.
+"""
 from fastapi import APIRouter, HTTPException
 import os
 import secrets
@@ -9,27 +14,27 @@ import time
 
 router = APIRouter()
 
-# Environment configuration
+# Configuración de entorno
 MELI_CLIENT_ID = os.getenv("MELI_CLIENT_ID")
 MELI_CLIENT_SECRET = os.getenv("MELI_CLIENT_SECRET")
 MELI_REDIRECT_URI = os.getenv("MELI_REDIRECT_URI")
 
-# Allow overriding for different sites (AR/MX/BR) if needed
+# Permite sobrescribir para diferentes sitios (AR/MX/BR) si es necesario
 AUTH_BASE = os.getenv("MELI_AUTH_BASE", "https://auth.mercadolibre.com/authorization")
 TOKEN_URL = os.getenv("MELI_TOKEN_URL", "https://api.mercadolibre.com/oauth/token")
 
-# PKCE ephemeral store (state -> code_verifier)
+# Almacenamiento efímero PKCE (state -> code_verifier)
 PKCE_STORE: dict[str, dict] = {}
 PKCE_TTL_SECONDS = int(os.getenv("MELI_PKCE_TTL", "600"))  # 10 minutes default
 
 def _generate_code_verifier(length: int = 64) -> str:
-    """Generate a PKCE code_verifier (RFC 7636, 43-128 chars)."""
+    """Genera un code_verifier PKCE (RFC 7636, 43-128 caracteres)."""
     verifier = secrets.token_urlsafe(length)
-    # Ensure max length 128
+    # Garantiza longitud máxima de 128
     return verifier[:128]
 
 def _code_challenge_s256(verifier: str) -> str:
-    """Create S256 code_challenge from verifier (base64url without padding)."""
+    """Crea un code_challenge S256 desde el verifier (base64url sin padding)."""
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
@@ -47,12 +52,12 @@ def _pop_pkce_verifier(state: str) -> str | None:
 
 @router.get("/meli/login")
 def meli_login():
-    """Return Mercado Libre OAuth authorization URL to start login flow."""
+    """Devuelve la URL de autorización OAuth de Mercado Libre para iniciar el flujo de login."""
     if not (MELI_CLIENT_ID and MELI_REDIRECT_URI):
         raise HTTPException(status_code=500, detail="MELI_CLIENT_ID and MELI_REDIRECT_URI must be set")
 
     state = secrets.token_urlsafe(16)
-    # PKCE: create code_verifier and S256 challenge, store verifier by state
+    # PKCE: crea code_verifier y challenge S256, guarda el verifier por state.
     code_verifier = _generate_code_verifier()
     code_challenge = _code_challenge_s256(code_verifier)
     _store_pkce_state(state, code_verifier)
@@ -71,14 +76,14 @@ def meli_login():
 
 @router.get("/meli/callback")
 def meli_callback(code: str, state: str | None = None):
-    """Handle OAuth callback: exchange code for access/refresh tokens."""
+    """Gestiona el callback OAuth: canjea el código por tokens de acceso/refresh."""
     if not (MELI_CLIENT_ID and MELI_CLIENT_SECRET and MELI_REDIRECT_URI):
         raise HTTPException(status_code=500, detail="MELI_CLIENT_ID, MELI_CLIENT_SECRET and MELI_REDIRECT_URI must be set")
 
     if not state:
         raise HTTPException(status_code=400, detail="state is required")
 
-    # Retrieve PKCE verifier for this state (and pop to prevent reuse)
+    # Recupera el verifier PKCE para este state (y lo extrae para evitar reutilización).
     code_verifier = _pop_pkce_verifier(state)
     if not code_verifier:
         raise HTTPException(status_code=400, detail={"message": "Invalid or expired state (PKCE)", "error": "invalid_request"})
@@ -106,5 +111,5 @@ def meli_callback(code: str, state: str | None = None):
         raise HTTPException(status_code=resp.status_code, detail=err)
 
     token = resp.json()
-    # TODO: persist tokens tied to the current user/session if needed.
+    # TODO: persistir tokens vinculados al usuario/sesión actual si es necesario.
     return {"status": "ok", "token": token}

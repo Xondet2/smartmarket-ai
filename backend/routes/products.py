@@ -5,9 +5,15 @@ from typing import Optional, List
 from database.db_config import get_db
 from database.models import Product
 from datetime import datetime
-from services.scraper import scraper
+from utils.api_key import require_internal_api_key
 
 router = APIRouter()
+"""
+Resumen del módulo:
+- Router de productos que expone CRUD básico.
+- Patrón: FastAPI + Pydantic, idempotencia por URL en creación.
+- Dependencias: inyección de `Session` (SQLAlchemy) y API Key interna opcional.
+"""
 
 class ProductRequest(BaseModel):
     url: str
@@ -42,16 +48,16 @@ async def search_products(
     raise HTTPException(status_code=501, detail="Search by name is not implemented. Use Mercado Libre product URL.")
 
 @router.post("/", response_model=ProductResponse)
-async def create_product(product: ProductRequest, db: Session = Depends(get_db)):
+async def create_product(product: ProductRequest, db: Session = Depends(get_db), _: None = Depends(require_internal_api_key)):
     """
-    Create a new product entry for analysis
+    Crea un nuevo registro de producto para análisis.
     """
     # Check if product already exists
     existing = db.query(Product).filter(Product.url == product.url).first()
     if existing:
         return existing
     
-    # Create new product
+    # Crea nuevo producto
     db_product = Product(
         name=product.name or "Unknown Product",
         platform=product.platform,
@@ -65,7 +71,7 @@ async def create_product(product: ProductRequest, db: Session = Depends(get_db))
 @router.get("/{product_id}", response_model=ProductResponse)
 async def get_product(product_id: int, db: Session = Depends(get_db)):
     """
-    Get product details by ID
+    Obtiene detalles del producto por su ID.
     """
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -75,7 +81,7 @@ async def get_product(product_id: int, db: Session = Depends(get_db)):
 @router.get("/", response_model=List[ProductResponse])
 async def list_products(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     """
-    List all analyzed products
+    Lista todos los productos analizados.
     """
     products = db.query(Product).offset(skip).limit(limit).all()
     return products
@@ -83,7 +89,7 @@ async def list_products(skip: int = 0, limit: int = 10, db: Session = Depends(ge
 @router.delete("/{product_id}")
 async def delete_product(product_id: int, db: Session = Depends(get_db)):
     """
-    Delete a product and all its associated data
+    Elimina un producto y todos sus datos asociados.
     """
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:

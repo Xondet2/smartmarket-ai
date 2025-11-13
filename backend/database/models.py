@@ -1,3 +1,11 @@
+"""
+Resumen del módulo:
+- Modelos SQLAlchemy: `User`, `Product`, `Review`, `AnalysisResult`.
+- Relaciones:
+  - `Product` 1:N `Review` y 1:N `AnalysisResult`.
+  - `User` 1:N `AnalysisResult`.
+- Patrón: timestamps `created_at`/`updated_at`, idempotencia por URL en `Product`.
+"""
 from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -15,7 +23,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships
+    # Relaciones
     analyses = relationship("AnalysisResult", back_populates="user", cascade="all, delete-orphan")
 
 class Product(Base):
@@ -31,7 +39,7 @@ class Product(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships
+    # Relaciones
     reviews = relationship("Review", back_populates="product", cascade="all, delete-orphan")
     analyses = relationship("AnalysisResult", back_populates="product", cascade="all, delete-orphan")
 
@@ -47,7 +55,7 @@ class Review(Base):
     platform = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # Relationships
+    # Relaciones
     product = relationship("Product", back_populates="reviews")
 
 class AnalysisResult(Base):
@@ -66,6 +74,6 @@ class AnalysisResult(Base):
     price_data = Column(JSON)
     analyzed_at = Column(DateTime, default=datetime.utcnow)
     
-    # Relationships
+    # Relaciones
     product = relationship("Product", back_populates="analyses")
     user = relationship("User", back_populates="analyses")

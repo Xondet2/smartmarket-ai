@@ -1,3 +1,8 @@
+"""
+Resumen del módulo:
+- Configuración de SQLAlchemy: engine, SessionLocal y Base.
+- Patrón: adaptación de URL para PostgreSQL (Heroku/Railway) y SQLite dev.
+"""
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -5,24 +10,24 @@ import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./smartmarket.db")
 
-# Fix for Heroku/Railway PostgreSQL URLs (they use postgres:// instead of postgresql://)
+# Ajuste para URLs de PostgreSQL en Heroku/Railway (usan postgres:// en vez de postgresql://)
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Create engine with appropriate settings for SQLite or PostgreSQL
+# Crea el engine con configuración apropiada para SQLite o PostgreSQL
 connect_args = {}
 if "sqlite" in DATABASE_URL:
     connect_args = {"check_same_thread": False}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
-# Create SessionLocal class
+# Crea la clase SessionLocal
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create Base class for models
+# Crea la clase Base para modelos
 Base = declarative_base()
 
-# Dependency to get database session
+# Dependencia para obtener la sesión de base de datos
 def get_db():
     db = SessionLocal()
     try:
@@ -30,7 +35,7 @@ def get_db():
     finally:
         db.close()
 
-# Initialize database
+# Inicializa la base de datos
 def init_db():
-    """Create all tables in the database"""
+    """Crea todas las tablas en la base de datos."""
     Base.metadata.create_all(bind=engine)

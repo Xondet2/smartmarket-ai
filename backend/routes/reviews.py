@@ -5,8 +5,16 @@ from typing import List, Optional
 from datetime import datetime
 from database.db_config import get_db
 from database.models import Review, Product
+from utils.api_key import require_internal_api_key
+from utils.rate_limit import rate_limit
 
 router = APIRouter()
+"""
+Resumen del módulo:
+- Router de reseñas: lectura y creación (simple y bulk).
+- Patrón: FastAPI + Pydantic + SQLAlchemy, rate limit y API Key opcional.
+- Idempotencia y validaciones básicas por existencia de producto.
+"""
 
 class ReviewCreate(BaseModel):
     product_id: int
@@ -36,14 +44,14 @@ class ReviewsListResponse(BaseModel):
 @router.get("/{product_id}", response_model=ReviewsListResponse)
 async def get_reviews(product_id: int, skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
     """
-    Get all reviews for a specific product
+    Obtiene todas las reseñas de un producto específico.
     """
     # Check if product exists
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    # Get reviews
+    # Obtener reseñas
     reviews = db.query(Review).filter(Review.product_id == product_id).offset(skip).limit(limit).all()
     total = db.query(Review).filter(Review.product_id == product_id).count()
     
@@ -53,9 +61,9 @@ async def get_reviews(product_id: int, skip: int = 0, limit: int = 50, db: Sessi
     }
 
 @router.post("/", response_model=ReviewResponse)
-async def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
+async def create_review(review: ReviewCreate, db: Session = Depends(get_db), _: None = Depends(require_internal_api_key)):
     """
-    Add a new review to the database
+    Agrega una nueva reseña a la base de datos.
     """
     # Check if product exists
     product = db.query(Product).filter(Product.id == review.product_id).first()
@@ -76,9 +84,9 @@ async def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
     return db_review
 
 @router.post("/bulk")
-async def create_reviews_bulk(reviews: List[ReviewCreate], db: Session = Depends(get_db)):
+async def create_reviews_bulk(reviews: List[ReviewCreate], db: Session = Depends(get_db), __: None = Depends(rate_limit), _: None = Depends(require_internal_api_key)):
     """
-    Add multiple reviews at once (useful for scraping)
+    Agrega múltiples reseñas de una vez (útil para scraping).
     """
     db_reviews = []
     for review in reviews:

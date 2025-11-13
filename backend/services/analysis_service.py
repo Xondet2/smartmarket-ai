@@ -3,14 +3,22 @@ from sqlalchemy.orm import Session
 from database.models import Product, Review, AnalysisResult
 from services.scraper import scraper
 from services.sentiment_analyzer import sentiment_analyzer
+from utils.metrics import ANALYSIS_REQUESTS, ANALYSIS_DURATION, API_ERRORS
+from utils.logging import get_logger
 # Eliminamos comparación de precios para enfocarnos en opiniones
 from datetime import datetime
 
 class AnalysisService:
     async def analyze_product_complete(self, product_id: int, db: Session, user_id: Optional[int] = None) -> Dict:
+        logger = get_logger("services.analysis_service")
+        ANALYSIS_REQUESTS.inc()
+        import time
+        start_t = time.time()
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product:
-            raise ValueError(f"Producto {product_id} no encontrado")
+            API_ERRORS.labels(endpoint="analysis").inc()
+            # Mensaje de error interno en inglés (los mensajes al usuario pueden permanecer localizados).
+            raise ValueError(f"Product {product_id} not found")
         
         # Update product info with API/scraping
         product_info = scraper.scrape_product(product.url)
@@ -79,10 +87,10 @@ class AnalysisService:
                 pass
         db.commit()
         
-        # Scrape reviews with API priority
+        # Scraping de reseñas con prioridad de API
         scraped_reviews = scraper.scrape_reviews(product.url, max_reviews=50)
         
-        # Save reviews
+        # Guardar reseñas
         for review_data in scraped_reviews:
             review = Review(
                 product_id=product.id,
@@ -95,7 +103,7 @@ class AnalysisService:
             db.add(review)
         db.commit()
         
-        # Get all reviews for analysis
+        # Obtener todas las reseñas para el análisis
         all_reviews = db.query(Review).filter(Review.product_id == product.id).all()
         review_dicts = [
             {'text': r.text, 'rating': r.rating, 'review_date': r.review_date}
@@ -108,7 +116,7 @@ class AnalysisService:
         # Sin comparación de precios: mantenemos price_data como None
         price_data = None
         
-        # Save analysis
+        # Guardar análisis
         analysis = AnalysisResult(
             product_id=product.id,
             user_id=user_id,
@@ -125,6 +133,9 @@ class AnalysisService:
         db.add(analysis)
         db.commit()
         db.refresh(analysis)
+        dur = time.time() - start_t
+        ANALYSIS_DURATION.observe(dur)
+        logger.info({"event": "analysis_completed", "product_id": product.id, "analysis_id": analysis.id, "duration_s": round(dur, 3)})
         
         return {
             'product_id': product.id,
@@ -135,5 +146,5 @@ class AnalysisService:
             'status': 'completed'
         }
 
-# Singleton
+# Instancia singleton
 analysis_service = AnalysisService()

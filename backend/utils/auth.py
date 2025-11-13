@@ -8,28 +8,36 @@ from sqlalchemy.orm import Session
 from database.db_config import get_db
 from database.models import User
 import os
+from utils.logging import get_logger
 
-# Security configuration
+"""
+Resumen del módulo:
+- Utilidades de autenticación: hashing, JWT, y dependencias de usuario actual.
+- Patrón: HTTP Bearer + JWT con expiración configurable por entorno.
+- Buenas prácticas: mensajes internos en inglés, logging estructurado en errores.
+"""
+
+# Configuración de seguridad
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production-please-use-strong-key")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 7)))  # configurable, default 7 días
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 security_optional = HTTPBearer(auto_error=False)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against a hashed password."""
+    """Verifica una contraseña en texto plano contra su hash."""
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt."""
+    """Genera el hash de una contraseña usando bcrypt."""
     return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Create a JWT access token."""
+    """Crea un token JWT de acceso."""
     to_encode = data.copy()
-    # Ensure JWT subject is a string per spec
+    # Asegura que el sujeto JWT sea cadena según la especificación.
     if "sub" in to_encode:
         to_encode["sub"] = str(to_encode["sub"]) 
     if expires_delta:
@@ -42,13 +50,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 def decode_token(token: str) -> dict:
-    """Decode and verify a JWT token."""
+    """Decodifica y verifica un token JWT."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except JWTError as e:
-        # Basic diagnostic; avoid leaking sensitive details in response
-        print(f"JWT decode error: {e}")
+        # Diagnóstico básico; evitar filtrar detalles sensibles en la respuesta.
+        logger = get_logger("utils.auth")
+        logger.error({"event": "jwt_decode_error", "error": str(e)})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -59,7 +68,7 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
-    """Get the current authenticated user from the JWT token."""
+    """Obtiene el usuario autenticado actual desde el token JWT."""
     token = credentials.credentials
     payload = decode_token(token)
     
@@ -96,7 +105,7 @@ def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
     db: Session = Depends(get_db)
 ) -> Optional[User]:
-    """Get the current user if authenticated, otherwise return None."""
+    """Obtiene el usuario actual si está autenticado; en caso contrario, devuelve None."""
     if not credentials:
         return None
     

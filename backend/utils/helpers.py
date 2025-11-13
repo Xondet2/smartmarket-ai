@@ -1,3 +1,8 @@
+"""
+Resumen del módulo:
+- Utilidades de texto: limpieza, extracción de palabras clave, etiquetado de sentimiento, formateo de precios.
+- Patrón: funciones puras y reutilizables con tipado estático.
+"""
 from typing import List, Dict
 import re
 from datetime import datetime
@@ -5,7 +10,7 @@ from collections import Counter
 
 def clean_text(text: str) -> str:
     """
-    Clean and normalize text for analysis
+    Limpia y normaliza texto para el análisis.
     """
     if not text:
         return ""
@@ -20,8 +25,8 @@ def clean_text(text: str) -> str:
 
 def extract_keywords(text: str, top_n: int = 10) -> List[str]:
     """
-    Extract most common keywords from text
-    Enhanced implementation with better filtering
+    Extrae las palabras clave más comunes del texto.
+    Implementación mejorada con mejor filtrado.
     """
     if not text:
         return []
@@ -56,7 +61,7 @@ def extract_keywords(text: str, top_n: int = 10) -> List[str]:
 
 def calculate_sentiment_label(score: float) -> str:
     """
-    Convert sentiment score to label
+    Convierte un puntaje de sentimiento a una etiqueta.
     """
     if score >= 0.6:
         return 'positive'
@@ -67,7 +72,7 @@ def calculate_sentiment_label(score: float) -> str:
 
 def format_price(price: float, currency: str = 'USD') -> str:
     """
-    Format price with currency symbol
+    Formatea un precio con símbolo de moneda.
     """
     symbols = {
         'USD': '$',

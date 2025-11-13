@@ -1,3 +1,8 @@
+"""
+Resumen del módulo:
+- Router de autenticación: registro, inicio de sesión, perfil y actualización.
+- Patrón: JWT + HTTP Bearer, validaciones Pydantic y SQLAlchemy para duplicados.
+"""
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr, Field
@@ -13,7 +18,7 @@ from datetime import timedelta
 
 router = APIRouter()
 
-# Pydantic models for request/response
+# Modelos Pydantic para petición/respuesta
 class UserRegister(BaseModel):
     email: EmailStr
     username: str = Field(..., min_length=3, max_length=50)
@@ -44,9 +49,9 @@ class UserUpdate(BaseModel):
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
-    """Register a new user."""
+    """Registrar un nuevo usuario."""
     
-    # Check if email already exists
+    # Verifica si el email ya existe
     existing_email = db.query(User).filter(User.email == user_data.email).first()
     if existing_email:
         raise HTTPException(
@@ -54,7 +59,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
             detail="Email already registered"
         )
     
-    # Check if username already exists
+    # Verifica si el nombre de usuario ya existe
     existing_username = db.query(User).filter(User.username == user_data.username).first()
     if existing_username:
         raise HTTPException(
@@ -62,7 +67,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
             detail="Username already taken"
         )
     
-    # Create new user
+    # Crea nuevo usuario
     hashed_password = get_password_hash(user_data.password)
     
     new_user = User(
@@ -86,9 +91,9 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 def login(user_data: UserLogin, db: Session = Depends(get_db)):
-    """Login and get access token."""
+    """Iniciar sesión y obtener token de acceso."""
     
-    # Find user by email
+    # Busca usuario por email
     user = db.query(User).filter(User.email == user_data.email).first()
     
     if not user:
@@ -111,7 +116,7 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
             detail="Inactive user"
         )
     
-    # Create access token
+    # Crea token de acceso
     access_token = create_access_token(
         data={"sub": user.id, "email": user.email}
     )
@@ -120,7 +125,7 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
-    """Get current user information."""
+    """Obtener información del usuario actual."""
     return current_user
 
 @router.put("/me", response_model=UserResponse)
@@ -129,7 +134,7 @@ def update_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update current user information."""
+    """Actualizar información del usuario actual."""
     if user_update.full_name:
         current_user.full_name = user_update.full_name
     db.commit()

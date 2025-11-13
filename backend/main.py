@@ -1,10 +1,17 @@
-from fastapi import FastAPI
+"""
+Resumen del módulo:
+- Punto de entrada FastAPI: configura CORS, routers, salud, estado de BD y métricas.
+- Patrón: inicialización en `startup`, observabilidad con logging JSON y Prometheus.
+"""
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from routes import products, reviews, analysis, auth, meli_oauth
 from database.db_config import init_db, engine
 import os
 from dotenv import load_dotenv
 from sqlalchemy import inspect
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from utils.logging import get_logger
 
 load_dotenv()
 
@@ -13,22 +20,20 @@ app = FastAPI(
     description="API for product analysis with AI-powered sentiment analysis",
     version="1.0.0"
 )
+logger = get_logger("main")
 
-# Get allowed origins from environment variable or use defaults
-# Normalize by trimming spaces and removing empty entries
+# Obtiene los orígenes permitidos desde la variable de entorno o usa valores por defecto.
+# Normaliza recortando espacios y eliminando entradas vacías.
 allowed_origins_env = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:5173,http://localhost:3000"
 )
 allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
 
-# Optional: allow origins via regex (useful for Vercel previews like https://*.vercel.app)
+# Opcional: permitir orígenes vía regex (útil para previews de Vercel como https://*.vercel.app)
 allowed_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX", None)
 
-# Debug prints to verify CORS configuration on startup
-print("🔐 CORS configured with:")
-print(f"   allow_origins: {allowed_origins}")
-print(f"   allow_origin_regex: {allowed_origin_regex}")
+logger.info({"event": "cors_configured", "allow_origins": allowed_origins, "allow_origin_regex": allowed_origin_regex})
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,13 +46,12 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_event():
-    print("🚀 Starting SmartMarket AI API...")
+    logger.info({"event": "startup", "message": "Starting SmartMarket AI API"})
     init_db()
-    print("✅ Database initialized")
-    print("📍 Server running at http://localhost:8000")
-    print("📚 API docs at http://localhost:8000/docs")
+    logger.info({"event": "db_initialized"})
+    logger.info({"event": "server_info", "url": "http://localhost:8000", "docs": "http://localhost:8000/docs"})
 
-# Include routers
+# Inclusión de routers
 app.include_router(products.router, prefix="/api/products", tags=["products"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["reviews"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
@@ -68,7 +72,7 @@ def health_check():
 
 @app.get("/api/db-status")
 def db_status():
-    """Check database connection and tables"""
+    """Verifica la conexión a la base de datos y sus tablas."""
     inspector = inspect(engine)
     tables = inspector.get_table_names()
 
@@ -80,3 +84,8 @@ def db_status():
         "reviews_table_exists": "reviews" in tables,
         "analysis_results_table_exists": "analysis_results" in tables
     }
+
+@app.get("/metrics")
+def metrics():
+    data = generate_latest()
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)

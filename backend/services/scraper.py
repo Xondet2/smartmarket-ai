@@ -34,18 +34,34 @@ class ProductScraper:
         # Modo estricto: usar solo la API oficial; no complementar con HTML
         self.strict_api = str(os.getenv('MELI_STRICT_API', 'false')).lower() in {"1", "true", "yes"}
         self.logger = get_logger("services.scraper")
+        # Configuración OAuth ML para refresco
+        self.meli_token_url = os.getenv("MELI_TOKEN_URL", "https://api.mercadolibre.com/oauth/token")
+        self.meli_client_id = os.getenv("MELI_CLIENT_ID")
+        self.meli_client_secret = os.getenv("MELI_CLIENT_SECRET")
 
     # ----------------------------
     # Helpers internos
     # ----------------------------
     def _request_get(self, url: str, headers: Optional[Dict] = None, timeout: int = 15, retries: int = 2) -> requests.Response:
-        """GET con headers, timeout y reintentos simples con backoff."""
+        """GET con headers, timeout y reintentos simples con backoff.
+
+        Si la respuesta es 401 desde la API de ML y hay `refresh_token`, intenta
+        refrescar el access_token y reintenta una vez inmediatamente.
+        """
         hdrs = {**self.headers, **(headers or {})}
         last_exc = None
         for attempt in range(retries + 1):
             try:
                 SCRAPE_REQUESTS.inc()
                 resp = requests.get(url, headers=hdrs, timeout=timeout)
+                # Intento de refresco en 401 únicamente para dominio ML
+                if resp.status_code == 401 and "api.mercadolibre.com" in url:
+                    self.logger.warning({"event": "ml_unauthorized", "url": url})
+                    if self._refresh_access_token_if_possible():
+                        # Actualiza Authorization y reintenta de inmediato
+                        if "Authorization" in hdrs:
+                            hdrs["Authorization"] = f"Bearer {self.access_token}"
+                        resp = requests.get(url, headers=hdrs, timeout=timeout)
                 resp.raise_for_status()
                 return resp
             except requests.exceptions.RequestException as e:
@@ -55,6 +71,48 @@ class ProductScraper:
                 time.sleep(sleep_s)
         # Si falla después de reintentos, relanza última excepción
         raise last_exc
+
+    def _refresh_access_token_if_possible(self) -> bool:
+        """Refresca el access_token de ML si hay configuración y refresh_token en entorno."""
+        refresh_token = os.getenv("MERCADO_LIBRE_REFRESH_TOKEN")
+        if not (self.meli_client_id and self.meli_client_secret and refresh_token):
+            self.logger.error({
+                "event": "ml_refresh_missing_config",
+                "has_client_id": bool(self.meli_client_id),
+                "has_client_secret": bool(self.meli_client_secret),
+                "has_refresh_token": bool(refresh_token),
+            })
+            return False
+        data = {
+            "grant_type": "refresh_token",
+            "client_id": self.meli_client_id,
+            "client_secret": self.meli_client_secret,
+            "refresh_token": refresh_token,
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        try:
+            resp = requests.post(self.meli_token_url, data=data, headers=headers, timeout=15)
+        except requests.RequestException as e:
+            self.logger.error({"event": "ml_refresh_failed", "error": str(e)})
+            return False
+        if resp.status_code >= 400:
+            # Log detallado de error
+            try:
+                err = resp.json()
+            except Exception:
+                err = {"error": resp.text}
+            self.logger.error({"event": "ml_refresh_http_error", "status": resp.status_code, "detail": err})
+            return False
+        token = resp.json()
+        new_access = token.get("access_token")
+        if new_access:
+            self.access_token = new_access
+            os.environ["MERCADO_LIBRE_ACCESS_TOKEN"] = new_access
+        new_refresh = token.get("refresh_token")
+        if new_refresh:
+            os.environ["MERCADO_LIBRE_REFRESH_TOKEN"] = new_refresh
+        self.logger.info({"event": "ml_token_refreshed"})
+        return True
 
     def _normalize_image_url(self, url: Optional[str]) -> Optional[str]:
         """Normaliza URLs de imagen a https, manejando esquemas relativos."""

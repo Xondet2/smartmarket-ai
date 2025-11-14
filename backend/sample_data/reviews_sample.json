@@ -1,0 +1,23 @@
+[
+  {
+    "source": "trustpilot",
+    "item_type": "product",
+    "item_name": "Sony Headphones",
+    "rating": 5,
+    "text": "Excelente calidad de sonido y muy cómodos. Recomiendo."
+  },
+  {
+    "source": "rottentomatoes",
+    "item_type": "movie",
+    "item_name": "Iron Man",
+    "rating": 4,
+    "text": "Una película entretenida con gran actuación. Me encantó."
+  },
+  {
+    "source": "goodreads",
+    "item_type": "book",
+    "item_name": "Harry Potter",
+    "rating": 3,
+    "text": "Historia mágica, aunque algunas partes se sienten lentas."
+  }
+]

@@ -111,5 +111,52 @@ def meli_callback(code: str, state: str | None = None):
         raise HTTPException(status_code=resp.status_code, detail=err)
 
     token = resp.json()
-    # TODO: persistir tokens vinculados al usuario/sesión actual si es necesario.
+    # persistir tokens vinculados al usuario/sesión actual si es necesario.
+    return {"status": "ok", "token": token}
+
+
+@router.post("/meli/refresh")
+def meli_refresh(refresh_token: str | None = None):
+    """Refresca el `access_token` de Mercado Libre usando un `refresh_token`.
+
+    - Si no se proporciona `refresh_token`, intenta usar `MERCADO_LIBRE_REFRESH_TOKEN` del entorno.
+    - Devuelve el JSON de tokens de ML. Además, actualiza variables de entorno del proceso
+      (`MERCADO_LIBRE_ACCESS_TOKEN` y `MERCADO_LIBRE_REFRESH_TOKEN`) si están presentes en la respuesta.
+    """
+    if not (MELI_CLIENT_ID and MELI_CLIENT_SECRET):
+        raise HTTPException(status_code=500, detail="MELI_CLIENT_ID and MELI_CLIENT_SECRET must be set")
+
+    rt = refresh_token or os.getenv("MERCADO_LIBRE_REFRESH_TOKEN")
+    if not rt:
+        raise HTTPException(status_code=400, detail="refresh_token is required (or set MERCADO_LIBRE_REFRESH_TOKEN)")
+
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": MELI_CLIENT_ID,
+        "client_secret": MELI_CLIENT_SECRET,
+        "refresh_token": rt,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    try:
+        resp = requests.post(TOKEN_URL, data=data, headers=headers, timeout=15)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Refresh request failed: {e}")
+
+    if resp.status_code >= 400:
+        try:
+            err = resp.json()
+        except Exception:
+            err = {"error": resp.text}
+        raise HTTPException(status_code=resp.status_code, detail=err)
+
+    token = resp.json()
+    # Actualiza variables de entorno del proceso para facilitar uso inmediato en servicios
+    access_token = token.get("access_token")
+    if access_token:
+        os.environ["MERCADO_LIBRE_ACCESS_TOKEN"] = access_token
+    new_refresh = token.get("refresh_token")
+    if new_refresh:
+        os.environ["MERCADO_LIBRE_REFRESH_TOKEN"] = new_refresh
+
     return {"status": "ok", "token": token}

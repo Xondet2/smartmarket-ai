@@ -60,8 +60,8 @@ async def get_reviews(product_id: int, skip: int = 0, limit: int = 50, db: Sessi
         "total": total
     }
 
-@router.post("/", response_model=ReviewResponse)
-async def create_review(review: ReviewCreate, db: Session = Depends(get_db), _: None = Depends(require_internal_api_key)):
+@router.post("/", response_model=ReviewResponse, dependencies=[Depends(require_internal_api_key)])
+async def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
     """
     Agrega una nueva reseña a la base de datos.
     """
@@ -83,8 +83,8 @@ async def create_review(review: ReviewCreate, db: Session = Depends(get_db), _: 
     db.refresh(db_review)
     return db_review
 
-@router.post("/bulk")
-async def create_reviews_bulk(reviews: List[ReviewCreate], db: Session = Depends(get_db), __: None = Depends(rate_limit), _: None = Depends(require_internal_api_key)):
+@router.post("/bulk", dependencies=[Depends(rate_limit), Depends(require_internal_api_key)])
+async def create_reviews_bulk(reviews: List[ReviewCreate], db: Session = Depends(get_db)):
     """
     Agrega múltiples reseñas de una vez (útil para scraping).
     """

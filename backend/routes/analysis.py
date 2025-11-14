@@ -49,12 +49,12 @@ class AnalysisResponse(BaseModel):
         from_attributes = True
 
 async def run_analysis_task(product_id: int):
-    """Tarea en segundo plano que ejecuta el análisis con una sesión de BD nueva."""
+    """Background task to run analysis with a fresh DB session"""
     db = SessionLocal()
     started_at = time.time()
     try:
         result = await analysis_service.analyze_product_complete(product_id, db)
-        # Callback opcional al orquestador Java
+        # Optional callback to Java orchestrator
         callback_url = os.getenv("JAVA_CALLBACK_URL")
         if callback_url:
             try:
@@ -134,26 +134,24 @@ def _display_name(p: Product | None) -> str:
         return p.name
     return _derive_name_from_url(p.url if p else None)
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[Depends(require_internal_api_key), Depends(rate_limit)])
 async def analyze_product(
     request: AnalysisRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    _: None = Depends(require_internal_api_key),
-    __: None = Depends(rate_limit),
 ):
     """
-    Inicia el proceso de análisis de producto:
-    1. Crear u obtener el producto
-    2. Hacer scraping de reseñas (tarea en segundo plano)
-    3. Realizar análisis de sentimiento (tarea en segundo plano)
-    4. Guardar resultados
+    Start product analysis process:
+    1. Create or get product
+    2. Scrape reviews (background task)
+    3. Perform sentiment analysis (background task)
+    4. Store results
     """
-    # Verifica si el producto existe
+    # Check if product exists
     product = db.query(Product).filter(Product.url == request.product_url).first()
     
     if not product:
-        # Crea nuevo producto
+        # Create new product
         product = Product(
             name="Analyzing...",
             platform=request.platform,
@@ -163,7 +161,7 @@ async def analyze_product(
         db.commit()
         db.refresh(product)
     
-    # Agrega tarea en segundo plano para el análisis
+    # Add background task for analysis
     background_tasks.add_task(run_analysis_task, product.id)
     
     resp = {
@@ -179,7 +177,7 @@ async def analyze_product(
 @router.get("/{product_id}", response_model=AnalysisResponse)
 async def get_analysis(product_id: int, db: Session = Depends(get_db)):
     """
-    Obtiene los últimos resultados de análisis para un producto específico.
+    Get the latest analysis results for a specific product
     """
     analysis = db.query(AnalysisResult).filter(
         AnalysisResult.product_id == product_id
@@ -187,10 +185,10 @@ async def get_analysis(product_id: int, db: Session = Depends(get_db)):
     
     product = db.query(Product).filter(Product.id == product_id).first()
 
-    # Helpers movidos al ámbito del módulo: _display_name
+    # Helpers moved to module scope: _display_name
 
     if not analysis:
-        # Aún no hay análisis: devuelve estado de procesamiento en lugar de 404
+        # No analysis yet: return processing status instead of 404
         return {
             "id": 0,
             "product_id": product_id,
@@ -230,7 +228,7 @@ async def get_analysis(product_id: int, db: Session = Depends(get_db)):
 @router.get("/", response_model=List[AnalysisResponse])
 async def list_analyses(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     """
-    Lista todos los resultados de análisis.
+    List all analysis results
     """
     analyses = db.query(AnalysisResult).join(Product).order_by(
         AnalysisResult.analyzed_at.desc()

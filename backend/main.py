@@ -5,7 +5,7 @@ Resumen del módulo:
 """
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from routes import products, reviews, analysis, auth, meli_oauth
+from routes import products, reviews, analysis, auth, meli_oauth, scrape_practice
 from database.db_config import init_db, engine
 import os
 from dotenv import load_dotenv
@@ -26,7 +26,7 @@ logger = get_logger("main")
 # Normaliza recortando espacios y eliminando entradas vacías.
 allowed_origins_env = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:3000"
+    "http://localhost:5173,http://localhost:3000,http://localhost:3001"
 )
 allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
 
@@ -57,6 +57,7 @@ app.include_router(reviews.router, prefix="/api/reviews", tags=["reviews"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(meli_oauth.router, prefix="/api/auth", tags=["meli-auth"])
+app.include_router(scrape_practice.router, prefix="/api", tags=["scrape-practice"])
 
 @app.get("/")
 def read_root():

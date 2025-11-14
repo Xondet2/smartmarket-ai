@@ -12,15 +12,13 @@ from fastapi import Request, HTTPException
 RATE_STATE: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=1000))
 
 
-def _key_for_request(request: Request | None) -> str:
-    if not request:
-        return "global"
+def _key_for_request(request: Request) -> str:
     client_ip = getattr(getattr(request, "client", None), "host", None) or "unknown"
     path = request.url.path if request and request.url else "unknown"
     return f"{client_ip}:{path}"
 
 
-def rate_limit(request: Request | None = None, max_per_minute: int = 10) -> None:
+def rate_limit(request: Request, max_per_minute: int = 10) -> None:
     """
     Limitador de tasa en memoria por IP del cliente y ruta.
     No distribuido; adecuado para despliegues de un solo proceso.
